@@ -90,7 +90,7 @@ button{font:inherit;cursor:pointer}
 
 /* list view */
 .blist{display:flex;flex-direction:column}
-.lrow{display:grid;grid-template-columns:minmax(160px,2.4fr) 110px minmax(90px,1fr) 64px;align-items:center;gap:12px;padding:12px 10px;
+.lrow{display:grid;grid-template-columns:minmax(160px,2.4fr) minmax(110px,1.3fr) 110px minmax(90px,1fr) 64px;align-items:center;gap:12px;padding:12px 10px;
   border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}
 .lrow:hover{background:#fafafa}
 .lrow.lhead{cursor:default;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600;border-bottom:2px solid var(--line)}
@@ -102,6 +102,10 @@ button{font:inherit;cursor:pointer}
 .ltitle{font-size:15px;font-weight:600;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lsub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lowner{font-size:13px;color:#3a3a3c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lfolder{min-width:0;font-size:13px}
+.folderlink{color:var(--accent);text-decoration:none;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;max-width:100%}
+.folderlink:hover{text-decoration:underline}
+.lfolder-empty{color:#c2c2c8}
 .lactions{display:flex;align-items:center;justify-content:flex-end;gap:4px}
 .star{background:none;border:none;font-size:16px;color:#d2d2d7;cursor:pointer;padding:4px;line-height:1}
 .star:hover{color:#ffb700}

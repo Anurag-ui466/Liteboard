@@ -141,6 +141,12 @@ async function renderHome(session) {
   const { data: profs } = await sb.from("profiles").select("id,full_name,email")
     .in("id", ownerIds.length ? ownerIds : ["00000000-0000-0000-0000-000000000000"]);
   const nameOf = {}; (profs || []).forEach((p) => (nameOf[p.id] = p.full_name || (p.email || "").split("@")[0]));
+  // Best-effort: pull each board's Nitro Forge project-folder URL (doc.projectFolder)
+  // in its own query so a JSON-path issue can never break the main board list.
+  try {
+    const { data: fol } = await sb.from("boards").select("id, folder:doc->>projectFolder");
+    if (fol) { const fmap = {}; fol.forEach((r) => { if (r.folder) fmap[r.id] = r.folder; }); (boards || []).forEach((b) => { b.folder = fmap[b.id]; }); }
+  } catch (e) { /* json-path select unsupported — folder column just stays empty */ }
 
   const all = boards || [];
   let view = localStorage.getItem("lb_view") || "list";
@@ -228,17 +234,18 @@ async function renderHome(session) {
         </div>`).join("");
     } else {
       boardsEl.className = "blist";
-      boardsEl.innerHTML = `<div class="lrow lhead"><span>Name</span><span>Status</span><span>Owner</span><span></span></div>` +
+      boardsEl.innerHTML = `<div class="lrow lhead"><span>Name</span><span>Project folder</span><span>Status</span><span>Owner</span><span></span></div>` +
         list.map((b) => `
         <div class="lrow" data-open="${b.id}">
           <span class="lname">${iconCell(b)}<span class="lnamecol"><span class="ltitle">${escapeHtml(b.title)}</span><span class="lsub">Modified by ${escapeHtml(nameOf[b.owner_id] || "someone")}, ${relDate(b.updated_at)}</span></span></span>
+          <span class="lfolder">${b.folder ? `<a class="folderlink" href="${escapeHtml(b.folder)}" target="_blank" rel="noopener" data-folder title="Open the project asset folder">Open folder ↗</a>` : `<span class="lfolder-empty">—</span>`}</span>
           <span><span class="badge s-${b.status}">${b.status.replace("_", " ")}</span></span>
           <span class="lowner">${escapeHtml(nameOf[b.owner_id] || "—")}${b.owner_id === user.id ? " (you)" : ""}</span>
           <span class="lactions"><button class="rowmenu" data-menu="${b.id}" title="More">⋮</button></span>
         </div>`).join("");
     }
     boardsEl.querySelectorAll("[data-open]").forEach((el) => el.onclick = (e) => {
-      if (e.target.closest("[data-star],[data-menu]")) return;
+      if (e.target.closest("[data-star],[data-menu],[data-folder]")) return;
       location.href = `board.html?id=${el.dataset.open}`;
     });
     boardsEl.querySelectorAll("[data-star]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); const id = b.dataset.star; starred.has(id) ? starred.delete(id) : starred.add(id); saveStars(); render(); });

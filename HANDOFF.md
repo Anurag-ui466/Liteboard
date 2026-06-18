@@ -3,7 +3,13 @@
 > Goal: turn the single-user LiteBoard into a **shared multi-team system**.
 > Workflow: Art Director authors a board (moodboard → art bible → scoping → resourcing),
 > **hands it off to the Art Lead** for execution, and **tracks every board live by logging in**.
-> Last updated: 13 Jun 2026.
+> Last updated: 18 Jun 2026.
+
+> **18 Jun:** Dashboard list view gained a **Project folder** column (between Name and
+> Status). It links to `doc.projectFolder` — the public URL of the board's Nitro Forge
+> asset gallery (`index.html`) in the media bucket — opened in a new tab. Pulled via a
+> separate best-effort `select("id, folder:doc->>projectFolder")` so a JSON-path issue
+> can't break the board list; empty → shows "—". Edited `web/app.js` + `web/style.css`.
 
 ## Locked decisions
 - **Backend:** Supabase (self-hostable). Postgres + Auth + Realtime + Row-Level Security.
