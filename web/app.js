@@ -238,7 +238,9 @@ async function renderHome(session) {
         list.map((b) => `
         <div class="lrow" data-open="${b.id}">
           <span class="lname">${iconCell(b)}<span class="lnamecol"><span class="ltitle">${escapeHtml(b.title)}</span><span class="lsub">Modified by ${escapeHtml(nameOf[b.owner_id] || "someone")}, ${relDate(b.updated_at)}</span></span></span>
-          <span class="lfolder">${b.folder ? `<a class="folderlink" href="${escapeHtml(b.folder)}" target="_blank" rel="noopener" data-folder title="Open the project asset folder">Open folder ↗</a>` : `<span class="lfolder-empty">—</span>`}</span>
+          <span class="lfolder">${b.folder ? (b.folder.indexOf("file:") === 0
+            ? `<a class="folderlink" href="${escapeHtml(b.folder)}" data-folder data-copy="${escapeHtml(decodeURIComponent(b.folder.replace(/^file:\/\/\//, "")).replace(/\//g, "\\"))}" title="Copy the local folder path (paste into Explorer)">Copy folder path ⧉</a>`
+            : `<a class="folderlink" href="${escapeHtml(b.folder)}" target="_blank" rel="noopener" data-folder title="Open the project asset folder">Open folder ↗</a>`) : `<span class="lfolder-empty">—</span>`}</span>
           <span><span class="badge s-${b.status}">${b.status.replace("_", " ")}</span></span>
           <span class="lowner">${escapeHtml(nameOf[b.owner_id] || "—")}${b.owner_id === user.id ? " (you)" : ""}</span>
           <span class="lactions"><button class="rowmenu" data-menu="${b.id}" title="More">⋮</button></span>
@@ -247,6 +249,15 @@ async function renderHome(session) {
     boardsEl.querySelectorAll("[data-open]").forEach((el) => el.onclick = (e) => {
       if (e.target.closest("[data-star],[data-menu],[data-folder]")) return;
       location.href = `board.html?id=${el.dataset.open}`;
+    });
+    // Local folder links can't be opened from a web page (browser blocks file://),
+    // so clicking copies the path to paste into Explorer.
+    boardsEl.querySelectorAll("[data-copy]").forEach((el) => el.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const path = el.getAttribute("data-copy") || "";
+      try { navigator.clipboard.writeText(path); } catch (x) {}
+      const orig = el.textContent; el.textContent = "Path copied ✓";
+      setTimeout(() => { el.textContent = orig; }, 1400);
     });
     boardsEl.querySelectorAll("[data-star]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); const id = b.dataset.star; starred.has(id) ? starred.delete(id) : starred.add(id); saveStars(); render(); });
     boardsEl.querySelectorAll("[data-menu]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); openRowMenu(b, all.find((x) => x.id === b.dataset.menu)); });
