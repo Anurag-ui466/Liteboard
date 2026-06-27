@@ -3,8 +3,14 @@
 # of localStorage. Run: python build_liteboard_cloud.py
 import os, re
 
-PRISTINE = r"D:\Claude test\miscellaneous\Skip-Bo Art Style\LiteBoard_src\LiteBoard.html"
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "liteboard_cloud.html")
+HERE = os.path.dirname(os.path.abspath(__file__))
+# Engine source is vendored in-repo (src/LiteBoard.html) so the build is reproducible
+# from a fresh clone. Falls back to the legacy external path only if the vendored copy
+# is missing, to keep older local setups working.
+PRISTINE = os.path.join(HERE, "src", "LiteBoard.html")
+if not os.path.exists(PRISTINE):
+    PRISTINE = r"D:\Claude test\miscellaneous\Skip-Bo Art Style\LiteBoard_src\LiteBoard.html"
+OUT = os.path.join(HERE, "web", "liteboard_cloud.html")
 
 with open(PRISTINE, "r", encoding="utf-8") as f:
     app = f.read()
