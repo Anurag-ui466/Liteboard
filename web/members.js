@@ -8,11 +8,13 @@ export async function openMembers(sb, boardId) {
   const { data: board } = await sb.from("boards").select("title,owner_id").eq("id", boardId).single();
   if (!board) { alert("Couldn't open sharing — no access to this board."); return; }
   const amOwner = board.owner_id === me;
+  const link = new URL("board.html?id=" + boardId, location.href).href;
 
   const ov = document.createElement("div");
   ov.className = "mm-overlay";
   ov.innerHTML = `<div class="mm-modal" role="dialog" aria-modal="true">
     <div class="mm-head"><b>Share “${esc(board.title)}”</b><button class="mm-x" aria-label="Close">✕</button></div>
+    <div class="mm-link"><input class="mm-linkurl" type="text" readonly value="${esc(link)}" title="Board link"/><button class="mm-copy">Copy link</button></div>
     ${amOwner ? `<div class="mm-add">
         <input class="mm-email" type="email" placeholder="teammate@email.com" autocomplete="off"/>
         <select class="mm-role"><option value="editor">can edit</option><option value="viewer">can view</option></select>
@@ -26,6 +28,15 @@ export async function openMembers(sb, boardId) {
   ov.addEventListener("click", e => { if (e.target === ov) close(); });
   ov.querySelector(".mm-x").onclick = close;
   const listEl = ov.querySelector(".mm-list");
+
+  const copyBtn = ov.querySelector(".mm-copy"), linkInput = ov.querySelector(".mm-linkurl");
+  linkInput.onclick = () => linkInput.select();
+  copyBtn.onclick = async () => {
+    try { await navigator.clipboard.writeText(link); }
+    catch (e) { linkInput.select(); try { document.execCommand("copy"); } catch (_) {} }
+    const t = copyBtn.textContent; copyBtn.textContent = "Copied!"; copyBtn.classList.add("ok");
+    setTimeout(() => { copyBtn.textContent = t; copyBtn.classList.remove("ok"); }, 1500);
+  };
 
   function row(uid, role, pmap, isOwner) {
     const p = pmap[uid] || {};
