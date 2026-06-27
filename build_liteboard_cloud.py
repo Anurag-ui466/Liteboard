@@ -16,9 +16,8 @@ with open(PRISTINE, "r", encoding="utf-8") as f:
     app = f.read()
 
 # Cloud build: the board page already shows the project icon + name, so strip the
-# redundant "Lb LiteBoard" brand and the "v11" build label from the inner canvas toolbar.
+# redundant "Lb LiteBoard" brand from the inner canvas toolbar.
 app = re.sub(r'<b><img[^>]*>LiteBoard</b>', '', app)
-app = re.sub(r'<span id="lbver"[^>]*>v11</span>', '', app)
 
 # Crash-proofing: isolate each card/frame build so one corrupt object can't blank the whole canvas.
 app = app.replace(
