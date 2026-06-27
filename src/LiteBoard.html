@@ -199,7 +199,6 @@
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
 <div id="bar">
@@ -208,7 +207,7 @@
   <span class="grp"><button class="btn" onclick="exportPage(false)" title="Export page as PNG">⤓ PNG</button><button class="btn" onclick="exportPage(true)" title="Export page as PDF">⤓ PDF</button></span>
   <span class="grp"><button class="btn" onclick="detach()" title="Open as standalone window">⧉</button></span>
   <span class="grp"><button class="btn" onclick="toggleFind()" title="Search & replace">🔍 Find</button></span>
-  <span class="grp"><button class="btn gold" onclick="save()" title="Save to current file">💾 Save</button><button class="btn" onclick="saveAs()">Save As</button><button class="btn" onclick="loadFile()">📂 Load</button><button class="btn" onclick="importHTML()" title="Import an .html page as an editable card">⬇ HTML</button><button class="btn" onclick="archive()" title="Archive: download a shareable zip of this board">📦 Archive</button><button class="btn" onclick="exportSnapshot()" title="Snapshot: save the board as an HTML page (like Save Page As)">📷 Snapshot</button></span>
+  <span class="grp"><button class="btn gold" onclick="save()" title="Save to current file">💾 Save</button><button class="btn" onclick="saveAs()">Save As</button><button class="btn" onclick="loadFile()">📂 Load</button><button class="btn" onclick="importHTML()" title="Import an .html page as an editable card">⬇ HTML</button><button class="btn" onclick="exportSnapshot()" title="Snapshot: save the board as an HTML page (like Save Page As)">📷 Snapshot</button></span>
 </div>
 <div id="rail">
   <button class="tool" id="handbtn" onclick="toggleHand()" title="Hand — drag to pan freely (also over cards)">✋</button>
@@ -581,11 +580,7 @@ async function importHTML(){let text=null,fname='Imported';
 function buildHtmlCard(text,title){const doc=new DOMParser().parseFromString(text,'text/html');let css='';doc.querySelectorAll('style').forEach(st=>{css+=st.textContent+'\n';});const body=doc.body?doc.body.innerHTML:text;const v=B().view;B().cards.push({id:uid(),type:'html',x:-v.x/v.k+120,y:-v.y/v.k+120,w:780,h:920,title:(title||'HTML page'),html:body,css:css});persist();render();toast('Imported '+(title||'HTML'));}
 function addText(){const v=B().view;const c={id:uid(),type:'text',x:-v.x/v.k+160,y:-v.y/v.k+160,w:320,title:'Heading',html:'<p></p>'};B().cards.push(c);persist();render();const el=canvas.querySelector('.card[data-id="'+c.id+'"] .rich');if(el)el.focus();}
 buildFontList();
-// ---------- archive ----------
-function _b64utf8(b){try{return decodeURIComponent(Array.prototype.map.call(atob(b),c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''));}catch(e){return atob(b);}}
-function _h(x){let h=0;for(let i=0;i<x.length;i++)h=(h*31+x.charCodeAt(i))>>>0;return h.toString(16);}
 function flushEdits(){try{if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();}catch(e){}}
-function _dataURIbytes(u){var m=/^data:([^;,]+)?(;base64)?,([\s\S]*)$/.exec(u);if(!m)return null;var mime=(m[1]||'application/octet-stream').toLowerCase(),b64=!!m[2],data=m[3],bytes;try{if(b64){var bin=atob(data);bytes=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);}else{var t=decodeURIComponent(data);bytes=new Uint8Array(t.length);for(var j=0;j<t.length;j++)bytes[j]=t.charCodeAt(j);}}catch(e){return null;}var ex={'image/jpeg':'jpg','image/jpg':'jpg','image/png':'png','image/gif':'gif','image/webp':'webp','image/svg+xml':'svg','image/bmp':'bmp','video/mp4':'mp4','video/webm':'webm','application/pdf':'pdf'}[mime]||'bin';return {bytes:bytes,ext:ex};}
 // Snapshot: save the board as a static HTML page (like a browser "Save Page As").
 // Clones the rendered canvas at scale 1, strips interactive-only chrome, and inlines
 // the stylesheet so it opens in any browser. Images stay as URLs (load when online).
@@ -610,40 +605,6 @@ async function exportSnapshot(){
   var fname=String((B()&&B().name)||'board').replace(/[^\w.-]+/g,'_')+'_snapshot.html';
   if(window.showSaveFilePicker){ try{ var h=await window.showSaveFilePicker({suggestedName:fname,types:[{description:'HTML page',accept:{'text/html':['.html']}}]}); var w=await h.createWritable(); await w.write(html); await w.close(); toast('Saved '+h.name); return; }catch(e){ if(e&&e.name==='AbortError')return; } }
   var blob=new Blob([html],{type:'text/html'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname; a.click(); toast('Saved '+fname);
-}
-async function archive(){
-  if(typeof JSZip==='undefined'){alert('Archive needs an internet connection the first time (it loads a small zip library). Connect and retry.');return;}
-  flushEdits();
-  const fname=((B()&&B().name)||'LiteBoard').replace(/\s+/g,'_')+'_archive.zip';
-  let handle=null;
-  if(window.showSaveFilePicker){try{handle=await window.showSaveFilePicker({suggestedName:fname,types:[{description:'Zip archive',accept:{'application/zip':['.zip']}}]});}catch(e){if(e&&e.name==='AbortError')return;handle=null;}}
-  const inlineDoc=JSON.parse(JSON.stringify(doc));
-  const dc=JSON.parse(JSON.stringify(doc));
-  const zip=new JSZip();const used=new Set();let got=0;const ext=new Set();const map={};
-  function nm(base,fallback){let bn=(base||fallback).split('?')[0].split(/[\\/]/).pop()||fallback;if(bn.indexOf('.')<0)bn=bn+'.'+fallback.split('.').pop();let n=bn,i=1;while(used.has(n)){const d=bn.lastIndexOf('.');n=(d>0?bn.slice(0,d):bn)+'_'+(i++)+(d>0?bn.slice(d):'');}used.add(n);return n;}
-  function take(u,hint){if(!u)return u;if(map[u])return map[u];
-    if(/^data:/i.test(u)){const b=_dataURIbytes(u);if(!b)return u;const name=nm((hint||'asset').replace(/[^\w.-]+/g,'_')+'.'+b.ext,'asset.'+b.ext);zip.folder('Resource').file(name,b.bytes);got++;map[u]='Resource/'+name;return map[u];}
-    if(/^https?:/i.test(u))return u;
-    ext.add(u);const name=nm(u,'asset.bin');map[u]='Resource/'+name;return map[u];}
-  (dc.pages||[]).forEach(p=>(p.cards||[]).forEach(c=>{
-    if((c.type==='image'||c.type==='video'||c.type==='pdf')&&c.src)c.src=take(c.src,c.title);
-    if(c.type==='html'&&c.html){c.html=c.html.replace(/src="([^"]+)"/g,(m0,u)=>'src="'+take(u)+'"');}
-  }));
-  zip.file('board.json',JSON.stringify(dc,null,1));
-  if(typeof APP_B64==='string'&&APP_B64){
-    let app=_b64utf8(APP_B64);const key='adp_'+_h(JSON.stringify(inlineDoc));
-    const LS=String.fromCharCode(0x2028),PS=String.fromCharCode(0x2029);const bj=JSON.stringify(inlineDoc).split(LS).join('\u2028').split(PS).join('\u2029').split('</').join('<\/');
-    app=app.replace('let doc, pen=','var EMBEDDED_DOC='+bj+';\nlet doc, pen=');
-    app=app.split('adp_lb_doc_v2').join(key);
-    app=app.replace("(function(){try{const s=localStorage.getItem('"+key+"');doc=s?JSON.parse(s):defaultDoc();}catch(e){doc=defaultDoc();}normalize();","(function(){try{const s=localStorage.getItem('"+key+"');const sd=s?JSON.parse(s):null;doc=(sd&&sd.pages&&sd.pages.length)?sd:(typeof EMBEDDED_DOC!=='undefined'?EMBEDDED_DOC:defaultDoc());}catch(e){doc=(typeof EMBEDDED_DOC!=='undefined'?EMBEDDED_DOC:defaultDoc());}normalize();");
-    zip.file('LiteBoard.html',app);
-  }
-  let rd="LiteBoard archive\n=================\n* LiteBoard.html  - self-contained; double-click to open (images embedded).\n* board.json      - editable board; images linked into the Resource folder.\n* Resource/       - "+got+" image/media file(s) extracted from the board.\n";
-  if(ext.size)rd+="\nThese were external file paths the browser could not read (open this archive in the LiteBoard desktop app to bundle them):\n"+[...ext].join("\n");
-  zip.file('README.txt',rd);
-  const blob=await zip.generateAsync({type:'blob'});
-  if(handle){try{const w=await handle.createWritable();await w.write(blob);await w.close();toast('Archived ('+got+' media) - '+handle.name);return;}catch(e){}}
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname;a.click();toast('Archived ('+got+' media) to Downloads');
 }
 // ---------- batch additions (snap, search/replace, linkify, grid, inline-confirm) ----------
 let snapOn=true, findHits=[], findIdx=-1;
