@@ -139,6 +139,8 @@
   #bgcolorbtn::-webkit-color-swatch{border:none;border-radius:50%}
   #bgcolorbtn::-moz-color-swatch{border:none;border-radius:50%}
   body.sheetmode #bgcolorbtn{display:none}
+  #rail,#histbar,#zoombar{cursor:grab}
+  #rail.dragging,#histbar.dragging,#zoombar.dragging,#bgcolorbtn.dragging{cursor:grabbing;opacity:.92}
 .card{display:flex;flex-direction:column}
   .card .hd{flex:0 0 auto}
   .card img,.card video{flex:0 0 auto}
@@ -326,6 +328,30 @@ function defaultDoc(){return {cur:0,pages:[{name:'Page 1',view:{x:40,y:20,k:.8},
 // ---------- view / persist / history ----------
 function applyView(){const v=B().view;canvas.style.transform=`translate(${v.x}px,${v.y}px) scale(${v.k})`;var _g=110*v.k;vp.style.backgroundPosition=v.x+'px '+v.y+'px';vp.style.backgroundSize=_g+'px '+_g+'px';var _bg=(B().bg||'#f5f5f7');vp.style.backgroundColor=_bg;var _bc=document.getElementById('bgcolorbtn');if(_bc&&_bc.value!==_bg)_bc.value=_bg;}
 function setCanvasBg(c){if(!B())return;B().bg=c;vp.style.backgroundColor=c;persist();}
+// Floating / movable UI panels: grab a bar and drag to reposition it (a tap still clicks the
+// button under the pointer; only movement past a small threshold becomes a drag). Positions are
+// remembered per browser in localStorage. Inner inputs (pen colour/size) are left interactive.
+function makeDraggable(el,key){
+  function placeAt(l,t){var w=el.offsetWidth,h=el.offsetHeight;l=Math.min(innerWidth-w-4,Math.max(4,l));t=Math.min(innerHeight-h-4,Math.max(4,t));el.style.left=l+'px';el.style.top=t+'px';el.style.right='auto';el.style.bottom='auto';el.style.transform='none';}
+  try{var s=JSON.parse(localStorage.getItem(key)||'null');if(s)placeAt(s.l,s.t);}catch(e){}
+  var down=null,dragging=false,justDragged=false;
+  el.addEventListener('pointerdown',function(e){if(e.button!==0)return;justDragged=false;var tg=(e.target.tagName||'').toLowerCase();if(tg==='input'||tg==='select'||tg==='textarea')return;var r=el.getBoundingClientRect();down={px:e.clientX,py:e.clientY,ox:e.clientX-r.left,oy:e.clientY-r.top};dragging=false;});
+  el.addEventListener('pointermove',function(e){if(!down)return;if(!dragging){if(Math.abs(e.clientX-down.px)+Math.abs(e.clientY-down.py)<5)return;dragging=true;try{el.setPointerCapture(e.pointerId);}catch(_){}el.classList.add('dragging');}placeAt(e.clientX-down.ox,e.clientY-down.oy);});
+  el.addEventListener('pointerup',function(){if(dragging){justDragged=true;el.classList.remove('dragging');try{localStorage.setItem(key,JSON.stringify({l:parseInt(el.style.left),t:parseInt(el.style.top)}));}catch(_){}}down=null;dragging=false;});
+  el.addEventListener('click',function(e){if(justDragged){e.stopPropagation();e.preventDefault();justDragged=false;}},true);
+}
+(function(){
+  ['rail','histbar','zoombar'].forEach(function(id){var el=document.getElementById(id);if(el)makeDraggable(el,'lb_pos_'+id);});
+  var b=document.getElementById('bgcolorbtn');if(b){var key='lb_pos_bgcolor';
+    function place(l,t){b.style.left=Math.min(innerWidth-b.offsetWidth-4,Math.max(4,l))+'px';b.style.top=Math.min(innerHeight-b.offsetHeight-4,Math.max(4,t))+'px';b.style.right='auto';b.style.bottom='auto';}
+    try{var s=JSON.parse(localStorage.getItem(key)||'null');if(s)place(s.l,s.t);}catch(e){}
+    var d=null,mv=false;
+    b.addEventListener('pointerdown',function(e){if(e.button!==0)return;var r=b.getBoundingClientRect();d={px:e.clientX,py:e.clientY,ox:e.clientX-r.left,oy:e.clientY-r.top};mv=false;});
+    b.addEventListener('pointermove',function(e){if(!d)return;if(!mv){if(Math.abs(e.clientX-d.px)+Math.abs(e.clientY-d.py)<5)return;mv=true;try{b.setPointerCapture(e.pointerId);}catch(_){}b.classList.add('dragging');}place(e.clientX-d.ox,e.clientY-d.oy);});
+    b.addEventListener('pointerup',function(){if(mv){b.classList.remove('dragging');try{localStorage.setItem(key,JSON.stringify({l:parseInt(b.style.left),t:parseInt(b.style.top)}));}catch(_){}}d=null;});
+    b.addEventListener('click',function(e){if(mv){e.preventDefault();e.stopPropagation();mv=false;}},true);
+  }
+})();
 function snap(){return JSON.stringify(doc)}
 function autosave(){try{if(window.__cloudSave)window.__cloudSave(doc);}catch(e){}}
 function scheduleCommit(){clearTimeout(cTimer);cTimer=setTimeout(commit,450);}
