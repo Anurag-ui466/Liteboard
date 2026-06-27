@@ -338,7 +338,7 @@ function renderTabs(){const bar=document.getElementById('pages');bar.innerHTML='
 function buildCard(c){
   const el=document.createElement('div');el.className='card';el.dataset.id=c.id;el.style.left=c.x+'px';el.style.top=c.y+'px';if(c.color)el.style.borderTop='3px solid '+c.color;if(c.w){el.style.width=c.w+'px';el.classList.add('has-w');}if(c.h)el.style.height=c.h+'px';
   if(c.type==='stamp'){el.classList.add('stamp');const ic=document.createElement('div');ic.className='stampicon '+(c.kind==='cross'?'st-cross':'st-tick');ic.textContent=c.kind==='cross'?'\u2715':'\u2713';ic.style.fontSize=((c.w||72)*0.74)+'px';el.appendChild(ic);
-  el.addEventListener('mousedown',e=>{if(e.target.classList.contains('resize'))return;e.preventDefault();selectCard(c.id,e.shiftKey);dragCard(c,el,e);});
+  el.addEventListener('mousedown',e=>{if(e.target.classList.contains('resize'))return;e.preventDefault();selectForDrag(c.id,e.shiftKey);dragCard(c,el,e);});
   const rz=document.createElement('div');rz.className='resize';el.appendChild(rz);
   rz.addEventListener('mousedown',e=>{e.preventDefault();e.stopPropagation();const v=B().view,sx=e.clientX,sw=c.w||el.offsetWidth;function mv(ev){c.w=Math.max(36,sw+(ev.clientX-sx)/v.k);el.style.width=c.w+'px';ic.style.fontSize=(c.w*0.74)+'px';el.classList.add('has-w');}function up(){document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);persist();}document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});
   if(selectedIds.has(c.id))el.classList.add('sel');return el;}
@@ -358,7 +358,7 @@ function buildCard(c){
     sc.addEventListener('mousedown',e=>e.stopPropagation());sc.addEventListener('click',e=>e.stopPropagation());
     sc.addEventListener('input',e=>{e.stopPropagation();c.fill=e.target.value;c.stroke=shadeDarker(c.fill);paint();tx.style.color=shapeTextColor(c.fill);persist();});
     el.appendChild(sc);
-    el.addEventListener('mousedown',e=>{if(e.target.classList.contains('resize')||e.target.classList.contains('scol'))return;if(tx.isContentEditable)return;e.preventDefault();selectCard(c.id,e.shiftKey);if(!c.locked)dragCard(c,el,e);});
+    el.addEventListener('mousedown',e=>{if(e.target.classList.contains('resize')||e.target.classList.contains('scol'))return;if(tx.isContentEditable)return;e.preventDefault();selectForDrag(c.id,e.shiftKey);if(!c.locked)dragCard(c,el,e);});
     el.addEventListener('dblclick',e=>{if(c.locked||e.target.classList.contains('scol')||e.target.classList.contains('resize'))return;e.stopPropagation();tx.contentEditable='true';tx.style.pointerEvents='auto';tx.focus();try{const r=document.createRange();r.selectNodeContents(tx);const s=window.getSelection();s.removeAllRanges();s.addRange(r);}catch(_){}});
     const rz=document.createElement('div');rz.className='resize';rz.title='drag to resize';el.appendChild(rz);
     rz.addEventListener('mousedown',e=>{if(c.locked)return;e.preventDefault();e.stopPropagation();const v=B().view,sx=e.clientX,sy=e.clientY,sw=c.w||el.offsetWidth,sh=c.h||el.offsetHeight;function mv(ev){c.w=Math.max(48,sw+(ev.clientX-sx)/v.k);c.h=Math.max(36,sh+(ev.clientY-sy)/v.k);el.style.width=c.w+'px';el.style.height=c.h+'px';}function up(){document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);persist();}document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});
@@ -380,7 +380,7 @@ function buildCard(c){
   hd.querySelector('.x').onclick=(e)=>{e.stopPropagation();c.no=!c.no;if(c.no)c.ok=false;el.classList.toggle('rejected',!!c.no);el.classList.toggle('approved',!!c.ok);persist();};
   hd.querySelector('.ok').onclick=(e)=>{e.stopPropagation();c.ok=!c.ok;if(c.ok)c.no=false;el.classList.toggle('approved',!!c.ok);el.classList.toggle('rejected',!!c.no);persist();};
   hd.querySelector('.lk').onclick=(e)=>{e.stopPropagation();c.locked=!c.locked;persist();render();};
-  hd.addEventListener('mousedown',e=>{if(e.target.classList.contains('x')||e.target.classList.contains('ok')||e.target.classList.contains('lk'))return;if(ttlEl.isContentEditable)return;e.preventDefault();selectCard(c.id,e.shiftKey);dragCard(c,el,e);});
+  hd.addEventListener('mousedown',e=>{if(e.target.classList.contains('x')||e.target.classList.contains('ok')||e.target.classList.contains('lk'))return;if(ttlEl.isContentEditable)return;e.preventDefault();selectForDrag(c.id,e.shiftKey);dragCard(c,el,e);});
   if(c.type==='image'||c.type==='video'){el.addEventListener('mousedown',e=>{if(e.target.closest('.hd'))return;selectCard(c.id,e.shiftKey);});}
   const rz=document.createElement('div');rz.className='resize';rz.title='drag to resize';el.appendChild(rz);
   rz.addEventListener('mousedown',e=>{if(c.locked)return;e.preventDefault();e.stopPropagation();const v=B().view,sx=e.clientX,sy=e.clientY,sw=c.w||el.offsetWidth,sh=c.h||el.offsetHeight;function mv(ev){c.w=Math.max(120,sw+(ev.clientX-sx)/v.k);c.h=Math.max(70,sh+(ev.clientY-sy)/v.k);el.style.width=c.w+'px';el.style.height=c.h+'px';el.classList.add('has-w');}function up(){document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);persist();}document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});
@@ -399,6 +399,10 @@ function startMove(primaryId,e){if(!selectedIds.has(primaryId))selectCard(primar
   function up(){document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);persist();}
   document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);}
 function selectCard(id,additive){if(!additive)selectedIds.clear();selectedIds.add(id);applySel();}
+// Used at drag-start: never collapse an existing multi-selection when you grab one of its
+// members (so all selected objects move together). Shift still extends; clicking an object
+// that isn't selected yet selects just it.
+function selectForDrag(id,shift){if(shift){selectCard(id,true);}else if(!selectedIds.has(id)){selectCard(id,false);}}
 function clearSel(){selectedIds.clear();applySel();}
 function applySel(){canvas.querySelectorAll('.card,.frame').forEach(el=>el.classList.toggle('sel',selectedIds.has(el.dataset.id)));renderInk();}
 function toggleSelect(){selMode=!selMode;if(selMode){handMode=false;document.getElementById('handbtn').classList.remove('on');vp.classList.remove('hand');document.body.classList.remove('handon');}document.getElementById('selbtn').classList.toggle('on',selMode);vp.classList.toggle('select',selMode);if(selMode&&pen.on){pen.on=false;updatePenUI();}}
@@ -475,7 +479,7 @@ function buildFrame(f){const el=document.createElement('div');el.className='fram
   const fc=hd.querySelector('.fcol');fc.onmousedown=(e)=>e.stopPropagation();fc.oninput=(e)=>{e.stopPropagation();f.color=e.target.value;el.style.borderColor=f.color;el.style.color=f.color;hd.style.color=f.color;applyFill();persist();};
   hd.querySelector('.fpng').onclick=(e)=>{e.stopPropagation();exportFrame(f,false);};
   hd.querySelector('.fpdf').onclick=(e)=>{e.stopPropagation();exportFrame(f,true);};
-  hd.addEventListener('mousedown',e=>{if(e.target.classList.contains('fpng')||e.target.classList.contains('fpdf')||e.target.classList.contains('flk')||e.target.classList.contains('fcol')||e.target.classList.contains('ffill'))return;if(tt.isContentEditable)return;e.preventDefault();selectCard(f.id,e.shiftKey);if(f.locked)return;startFrameMove(f,e);});
+  hd.addEventListener('mousedown',e=>{if(e.target.classList.contains('fpng')||e.target.classList.contains('fpdf')||e.target.classList.contains('flk')||e.target.classList.contains('fcol')||e.target.classList.contains('ffill'))return;if(tt.isContentEditable)return;e.preventDefault();selectForDrag(f.id,e.shiftKey);if(f.locked)return;startFrameMove(f,e);});
   rz.addEventListener('mousedown',e=>{if(f.locked)return;e.preventDefault();e.stopPropagation();const v=B().view,sx=e.clientX,sy=e.clientY,ow=f.w,oh=f.h;function mv(ev){f.w=Math.max(160,ow+(ev.clientX-sx)/v.k);f.h=Math.max(120,oh+(ev.clientY-sy)/v.k);el.style.width=f.w+'px';el.style.height=f.h+'px';}function up(){document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);persist();}document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});
   if(selectedIds.has(f.id))el.classList.add('sel');if(f.ok)el.classList.add('approved');if(f.locked)el.classList.add('locked');
   return el;}
