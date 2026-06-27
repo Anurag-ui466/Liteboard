@@ -109,6 +109,9 @@
   .rich blockquote{border-left:3px solid var(--accent);margin:.3em 0;padding-left:10px;color:var(--muted)}
   #pages{position:fixed;bottom:0;left:0;right:0;height:44px;background:rgba(255,255,255,.72);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-top:1px solid var(--line);display:flex;align-items:center;gap:5px;padding:0 12px;z-index:50;overflow-x:auto}
   .tab{display:flex;align-items:center;gap:7px;background:transparent;border:1px solid transparent;border-radius:9px;padding:7px 13px;font-size:12px;cursor:pointer;color:var(--muted);white-space:nowrap;font-weight:500}
+  #pages .cbtn{font-size:11px;font-weight:600;padding:4px 9px;border:1px dashed var(--accent);background:transparent;color:var(--accent);border-radius:8px;cursor:pointer;white-space:nowrap;line-height:1.4;flex:none}
+  #pages .cbtn:hover{background:rgba(0,113,227,.08)}
+  #pages .cbtn.first{margin-left:auto}
   .tab:hover{background:#ececee}
   .tab.active{background:#fff;color:var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.12);font-weight:600}
   .tab .tx{opacity:.5;font-size:11px}.tab .tx:hover{opacity:1;color:#ff3b30}
@@ -205,7 +208,7 @@
   <span class="grp"><button class="btn" onclick="exportPage(false)" title="Export page as PNG">⤓ PNG</button><button class="btn" onclick="exportPage(true)" title="Export page as PDF">⤓ PDF</button></span>
   <span class="grp"><button class="btn" onclick="detach()" title="Open as standalone window">⧉</button></span>
   <span class="grp"><button class="btn" onclick="toggleFind()" title="Search & replace">🔍 Find</button></span>
-  <span class="grp"><button class="btn gold" onclick="save()" title="Save to current file">💾 Save</button><button class="btn" onclick="saveAs()">Save As</button><button class="btn" onclick="loadFile()">📂 Load</button><button class="btn" onclick="importHTML()" title="Import an .html page as an editable card">⬇ HTML</button><button class="btn" onclick="archive()" title="Archive: download a shareable zip of this board">📦 Archive</button></span>
+  <span class="grp"><button class="btn gold" onclick="save()" title="Save to current file">💾 Save</button><button class="btn" onclick="saveAs()">Save As</button><button class="btn" onclick="loadFile()">📂 Load</button><button class="btn" onclick="importHTML()" title="Import an .html page as an editable card">⬇ HTML</button><button class="btn" onclick="archive()" title="Archive: download a shareable zip of this board">📦 Archive</button><button class="btn" onclick="exportSnapshot()" title="Snapshot: save the board as an HTML page (like Save Page As)">📷 Snapshot</button></span>
 </div>
 <div id="rail">
   <button class="tool" id="handbtn" onclick="toggleHand()" title="Hand — drag to pan freely (also over cards)">✋</button>
@@ -583,6 +586,31 @@ function _b64utf8(b){try{return decodeURIComponent(Array.prototype.map.call(atob
 function _h(x){let h=0;for(let i=0;i<x.length;i++)h=(h*31+x.charCodeAt(i))>>>0;return h.toString(16);}
 function flushEdits(){try{if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();}catch(e){}}
 function _dataURIbytes(u){var m=/^data:([^;,]+)?(;base64)?,([\s\S]*)$/.exec(u);if(!m)return null;var mime=(m[1]||'application/octet-stream').toLowerCase(),b64=!!m[2],data=m[3],bytes;try{if(b64){var bin=atob(data);bytes=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);}else{var t=decodeURIComponent(data);bytes=new Uint8Array(t.length);for(var j=0;j<t.length;j++)bytes[j]=t.charCodeAt(j);}}catch(e){return null;}var ex={'image/jpeg':'jpg','image/jpg':'jpg','image/png':'png','image/gif':'gif','image/webp':'webp','image/svg+xml':'svg','image/bmp':'bmp','video/mp4':'mp4','video/webm':'webm','application/pdf':'pdf'}[mime]||'bin';return {bytes:bytes,ext:ex};}
+// Snapshot: save the board as a static HTML page (like a browser "Save Page As").
+// Clones the rendered canvas at scale 1, strips interactive-only chrome, and inlines
+// the stylesheet so it opens in any browser. Images stay as URLs (load when online).
+function buildSnapshotHTML(){
+  var css=''; document.querySelectorAll('style').forEach(function(s){css+=s.textContent+'\n';});
+  var b=pageBounds();
+  var clone=canvas.cloneNode(true); clone.removeAttribute('id');
+  clone.style.position='absolute'; clone.style.left='0'; clone.style.top='0';
+  clone.style.transformOrigin='0 0'; clone.style.transform='translate('+(-b.x)+'px,'+(-b.y)+'px)';
+  clone.style.width=b.w+'px'; clone.style.height=b.h+'px';
+  clone.querySelectorAll('.resize,.eresize,.fresize,.shandle,.addimg,.lhandle,.lctrl,.scol,.gaddcol,.gaddrow,#strokebox').forEach(function(e){e.remove();});
+  clone.querySelectorAll('.hd .lk,.hd .ok,.hd .x,.fhd .flk,.fhd .fpng,.fhd .fpdf,.fhd .fcol,.fhd .ffill').forEach(function(e){e.remove();});
+  clone.querySelectorAll('[contenteditable]').forEach(function(e){e.setAttribute('contenteditable','false');});
+  var title=((B()&&B().name)||'LiteBoard');
+  return '<!doctype html>\n<html><head><meta charset="utf-8"><title>'+title.replace(/[&<>]/g,'')+'</title>\n<style>\n'+css+'\n</style>\n'
+    +'<style>html,body{margin:0;background:#f5f5f7}#snap{position:relative;width:'+Math.ceil(b.w)+'px;height:'+Math.ceil(b.h)+'px;margin:18px auto;overflow:hidden}</style></head>\n'
+    +'<body><div id="snap">'+clone.outerHTML+'</div></body></html>';
+}
+async function exportSnapshot(){
+  flushEdits();
+  var html=buildSnapshotHTML();
+  var fname=String((B()&&B().name)||'board').replace(/[^\w.-]+/g,'_')+'_snapshot.html';
+  if(window.showSaveFilePicker){ try{ var h=await window.showSaveFilePicker({suggestedName:fname,types:[{description:'HTML page',accept:{'text/html':['.html']}}]}); var w=await h.createWritable(); await w.write(html); await w.close(); toast('Saved '+h.name); return; }catch(e){ if(e&&e.name==='AbortError')return; } }
+  var blob=new Blob([html],{type:'text/html'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname; a.click(); toast('Saved '+fname);
+}
 async function archive(){
   if(typeof JSZip==='undefined'){alert('Archive needs an internet connection the first time (it loads a small zip library). Connect and retry.');return;}
   flushEdits();
@@ -815,8 +843,8 @@ function renderTabs(){
     });
     bar.appendChild(t);
   });
-  var add=document.createElement('button'); add.className='btn'; add.textContent='+ Page'; add.onclick=function(){addPage();}; bar.appendChild(add);
-  var addt=document.createElement('button'); addt.className='btn'; addt.textContent='+ Task list'; addt.onclick=function(){addSheet('tasks');}; bar.appendChild(addt);
+  var add=document.createElement('button'); add.className='cbtn first'; add.textContent='+ Page'; add.onclick=function(){addPage();}; bar.appendChild(add);
+  var addt=document.createElement('button'); addt.className='cbtn'; addt.textContent='+ Task list'; addt.onclick=function(){addSheet('tasks');}; bar.appendChild(addt);
 }
 function commitTabOrder(order){
   var pid=curPanelId(); var cur=doc.pages[doc.cur];
