@@ -89,6 +89,15 @@
   .card.shape .scol::-webkit-color-swatch-wrapper{padding:0}.card.shape .scol::-webkit-color-swatch{border:none;border-radius:50%}
   .card.shape.sel .scol{display:block}
   .card.shape.sel{outline:2px solid var(--accent);outline-offset:5px;border-radius:6px}
+  .card.shape.line{pointer-events:none;background:none}
+  .card.shape.line.sel{outline:none}
+  .card.shape.line .linesvg{position:absolute;left:0;top:0;overflow:visible}
+  .card.shape.line .lhandle{position:absolute;width:11px;height:11px;border-radius:50%;background:#fff;border:2px solid var(--accent);transform:translate(-50%,-50%);cursor:grab;display:none;pointer-events:auto;z-index:14;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+  .card.shape.line.sel .lhandle{display:block}
+  .card.shape.line .lctrl{position:absolute;display:none;gap:6px;align-items:center;background:rgba(255,255,255,.97);border:1px solid var(--line);border-radius:9px;padding:4px 7px;box-shadow:0 6px 20px rgba(0,0,0,.18);transform:translate(-50%,calc(-100% - 12px));pointer-events:auto;z-index:15;white-space:nowrap}
+  .card.shape.line.sel .lctrl{display:flex}
+  .card.shape.line .lctrl .lcol{width:22px;height:22px;border:1px solid var(--line);border-radius:5px;padding:0;cursor:pointer;background:#fff}
+  .card.shape.line .lctrl .lthk{width:84px;cursor:pointer}
   .card.shape .resize{background:linear-gradient(135deg,transparent 50%,#c7c7cc 50%)}
   #shapemenu{position:fixed;display:none;flex-direction:column;gap:2px;background:rgba(255,255,255,.96);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--line);border-radius:12px;padding:6px;z-index:85;box-shadow:0 10px 32px rgba(0,0,0,.18)}
   #shapemenu button{width:40px;height:40px;border:none;background:transparent;border-radius:9px;font-size:19px;cursor:pointer;color:var(--ink);display:flex;align-items:center;justify-content:center}
@@ -227,6 +236,7 @@
   <button onclick="addShape('ellipse')" title="Ellipse / circle">◯</button>
   <button onclick="addShape('diamond')" title="Diamond">◇</button>
   <button onclick="addShape('triangle')" title="Triangle">△</button>
+  <button onclick="addShape('line')" title="Line (adjustable thickness + colour)">╱</button>
 </div>
 <div id="histbar">
   <button class="btn" id="undobtn" onclick="undo()" title="Undo (Ctrl+Z)">↶</button>
@@ -343,6 +353,23 @@ function buildCard(c){
   const rz=document.createElement('div');rz.className='resize';el.appendChild(rz);
   rz.addEventListener('mousedown',e=>{e.preventDefault();e.stopPropagation();const v=B().view,sx=e.clientX,sw=c.w||el.offsetWidth;function mv(ev){c.w=Math.max(36,sw+(ev.clientX-sx)/v.k);el.style.width=c.w+'px';ic.style.fontSize=(c.w*0.74)+'px';el.classList.add('has-w');}function up(){document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);persist();}document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});
   if(selectedIds.has(c.id))el.classList.add('sel');return el;}
+  if(c.type==='shape'&&c.shape==='line'){el.classList.add('shape','line');el.style.borderTop='';
+    if(typeof c.thick!=='number')c.thick=3;if(!c.stroke)c.stroke='#1d1d1f';
+    const NS='http://www.w3.org/2000/svg';const svg=document.createElementNS(NS,'svg');svg.setAttribute('class','linesvg');svg.setAttribute('preserveAspectRatio','none');svg.style.pointerEvents='none';
+    const hit=document.createElementNS(NS,'line');hit.setAttribute('stroke','transparent');hit.setAttribute('stroke-linecap','round');hit.setAttribute('pointer-events','stroke');hit.style.cursor='move';
+    const ln=document.createElementNS(NS,'line');ln.setAttribute('stroke-linecap','round');ln.setAttribute('pointer-events','none');
+    svg.appendChild(hit);svg.appendChild(ln);el.appendChild(svg);
+    const hA=document.createElement('div');hA.className='lhandle';const hB=document.createElement('div');hB.className='lhandle';el.appendChild(hA);el.appendChild(hB);
+    const ctrl=document.createElement('div');ctrl.className='lctrl';ctrl.innerHTML='<input type="color" class="lcol" title="Line colour"><input type="range" class="lthk" min="1" max="24" title="Thickness">';el.appendChild(ctrl);
+    function ends(){return c.flip?{ax:0,ay:Math.abs(c.h),bx:Math.abs(c.w),by:0}:{ax:0,ay:0,bx:Math.abs(c.w),by:Math.abs(c.h)};}
+    function relayout(){var W=Math.max(1,Math.abs(c.w)),H=Math.max(1,Math.abs(c.h));el.style.left=c.x+'px';el.style.top=c.y+'px';el.style.width=W+'px';el.style.height=H+'px';svg.setAttribute('width',W);svg.setAttribute('height',H);svg.setAttribute('viewBox','0 0 '+W+' '+H);var e=ends();[hit,ln].forEach(function(L){L.setAttribute('x1',e.ax);L.setAttribute('y1',e.ay);L.setAttribute('x2',e.bx);L.setAttribute('y2',e.by);});ln.setAttribute('stroke',c.stroke);ln.setAttribute('stroke-width',c.thick);hit.setAttribute('stroke-width',Math.max(c.thick+12,16));hA.style.left=e.ax+'px';hA.style.top=e.ay+'px';hB.style.left=e.bx+'px';hB.style.top=e.by+'px';ctrl.style.left=((e.ax+e.bx)/2)+'px';ctrl.style.top=((e.ay+e.by)/2)+'px';}
+    relayout();
+    hit.addEventListener('mousedown',e=>{e.preventDefault();e.stopPropagation();selectForDrag(c.id,e.shiftKey);if(!c.locked)dragCard(c,el,e);});
+    function endDrag(handle,isA){handle.addEventListener('mousedown',function(e){if(c.locked)return;e.preventDefault();e.stopPropagation();selectForDrag(c.id,false);var ee=ends();var fixed=isA?{x:c.x+ee.bx,y:c.y+ee.by}:{x:c.x+ee.ax,y:c.y+ee.ay};function mv(ev){var p=toCanvas(ev.clientX,ev.clientY);var px=p.x,py=p.y,qx=fixed.x,qy=fixed.y;c.x=Math.min(px,qx);c.y=Math.min(py,qy);c.w=Math.abs(px-qx);c.h=Math.abs(py-qy);c.flip=((px<qx)!==(py<qy));relayout();}function up(){document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);persist();}document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});}
+    endDrag(hA,true);endDrag(hB,false);
+    var lc=ctrl.querySelector('.lcol');lc.value=c.stroke;lc.addEventListener('mousedown',e=>e.stopPropagation());lc.addEventListener('click',e=>e.stopPropagation());lc.addEventListener('input',e=>{e.stopPropagation();c.stroke=e.target.value;ln.setAttribute('stroke',c.stroke);persist();});
+    var lt=ctrl.querySelector('.lthk');lt.value=c.thick;lt.addEventListener('mousedown',e=>e.stopPropagation());lt.addEventListener('click',e=>e.stopPropagation());lt.addEventListener('input',e=>{e.stopPropagation();c.thick=+e.target.value;ln.setAttribute('stroke-width',c.thick);hit.setAttribute('stroke-width',Math.max(c.thick+12,16));persist();});
+    if(selectedIds.has(c.id))el.classList.add('sel');if(c.locked)el.classList.add('locked');return el;}
   if(c.type==='shape'){el.classList.add('shape');el.style.borderTop='';el.style.width=(c.w||180)+'px';el.style.height=(c.h||130)+'px';el.classList.add('has-w');
     const NS='http://www.w3.org/2000/svg';const svg=document.createElementNS(NS,'svg');svg.setAttribute('class','shapesvg');svg.setAttribute('viewBox','0 0 100 100');svg.setAttribute('preserveAspectRatio','none');
     let node;if(c.shape==='ellipse'){node=document.createElementNS(NS,'ellipse');node.setAttribute('cx','50');node.setAttribute('cy','50');node.setAttribute('rx','48');node.setAttribute('ry','48');}
@@ -492,7 +519,7 @@ function buildFrame(f){const el=document.createElement('div');el.className='fram
   return el;}
 function addFrame(){const v=B().view;B().frames=B().frames||[];B().frames.push({id:uid(),x:-v.x/v.k+120,y:-v.y/v.k+120,w:760,h:520,label:'Section',color:'#d9a441'});persist();render();}
 function addStamp(kind){const v=B().view;B().cards.push({id:uid(),type:'stamp',kind:kind,x:-v.x/v.k+200,y:-v.y/v.k+160,w:80});persist();render();}
-function addShape(kind){const v=B().view;const c={id:uid(),type:'shape',shape:kind||'rect',x:-v.x/v.k+200,y:-v.y/v.k+160,w:180,h:130,fill:'#cfe3ff',text:''};c.stroke=shadeDarker(c.fill);B().cards.push(c);persist();render();selectCard(c.id,false);hideShapeMenu();}
+function addShape(kind){const v=B().view;var c;if(kind==='line'){c={id:uid(),type:'shape',shape:'line',x:-v.x/v.k+170,y:-v.y/v.k+200,w:200,h:0,flip:false,stroke:'#1d1d1f',thick:3};}else{c={id:uid(),type:'shape',shape:kind||'rect',x:-v.x/v.k+200,y:-v.y/v.k+160,w:180,h:130,fill:'#cfe3ff',text:''};c.stroke=shadeDarker(c.fill);}B().cards.push(c);persist();render();selectCard(c.id,false);hideShapeMenu();}
 function toggleShapeMenu(e){if(e)e.stopPropagation();const m=document.getElementById('shapemenu');if(!m)return;if(m.style.display==='flex'){m.style.display='none';return;}const b=document.getElementById('shapebtn').getBoundingClientRect();m.style.display='flex';m.style.left=(b.right+8)+'px';m.style.top=Math.max(8,b.top)+'px';}
 function hideShapeMenu(){const m=document.getElementById('shapemenu');if(m)m.style.display='none';}
 document.addEventListener('mousedown',function(e){const m=document.getElementById('shapemenu');if(m&&m.style.display==='flex'&&!e.target.closest('#shapemenu')&&!e.target.closest('#shapebtn'))m.style.display='none';});
