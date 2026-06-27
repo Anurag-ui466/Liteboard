@@ -34,11 +34,8 @@ app = app.replace(
     "if(isPdf){if(typeof toast==='function')toast('PDFs cannot be added to the board');return;}if(!isVid&&!isImg)return;")
 app = app.replace('accept="image/*,video/*,application/pdf,.pdf"', 'accept="image/*,video/*"')
 
-# Make the grid move with the view: the grid is the viewport's fixed CSS background, so panning an
-# EMPTY board moved only the (empty) canvas layer and felt frozen. Pan/zoom the grid background too.
-app = app.replace(
-    "function applyView(){const v=B().view;canvas.style.transform=`translate(${v.x}px,${v.y}px) scale(${v.k})`}",
-    "function applyView(){const v=B().view;canvas.style.transform=`translate(${v.x}px,${v.y}px) scale(${v.k})`;var _g=110*v.k;vp.style.backgroundPosition=v.x+'px '+v.y+'px';vp.style.backgroundSize=_g+'px '+_g+'px';}")
+# (Grid pan/zoom + canvas background colour now live in the engine source applyView(), so the
+#  former build-time patch for the grid background was removed.)
 
 # Cloud model: saving is automatic (silent background save to Supabase), so the standalone's
 # disk-based Save / Save As / Load buttons are removed. HTML import + Archive (export) stay.
