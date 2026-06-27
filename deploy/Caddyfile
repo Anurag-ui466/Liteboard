@@ -1,0 +1,18 @@
+# LiteBoard Cloud — studio server (Caddy). Automatic HTTPS via Let's Encrypt.
+# 1. Replace the hostname below with the studio domain/subdomain pointed at this server.
+# 2. Root must point at the `web/` folder of the live release (see DEPLOY.md symlink layout).
+# 3. Run:  caddy run --config deploy/Caddyfile   (or install caddy as a service)
+
+art-board.example.studio {
+	root * /srv/liteboard/current/web
+	encode gzip
+
+	# Belt-and-suspenders: never serve dev auto-login credentials, even if present.
+	@creds path /config.local.js
+	respond @creds 404
+
+	# Mirror the dev server: disable caching so every deploy shows immediately on reload.
+	header Cache-Control "no-store"
+
+	file_server
+}
