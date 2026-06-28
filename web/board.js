@@ -109,6 +109,46 @@ async function main() {
   iframe.addEventListener("load", () => { try { iframe.contentWindow.postMessage({ type: "lb-request-presence" }, "*"); } catch (e) {} });
   // a click anywhere on the board chrome stops following (canvas clicks stop it from inside the iframe)
   document.addEventListener("click", () => { closeCallout(); if (followingId) stopFollow(iframe, avEl); });
+
+  watchEngineVersion();
+}
+
+// An open board tab keeps its in-memory engine until reloaded, so a freshly deployed
+// liteboard_cloud.html won't take effect on tabs left open. Watch the engine file's
+// Last-Modified and offer a one-click reload when it changes (on load, every 60s, and
+// whenever the tab regains focus / becomes visible).
+function watchEngineVersion() {
+  const ENGINE_URL = "liteboard_cloud.html";
+  let loaded = null, polling = false;
+  async function stamp() {
+    try {
+      const r = await fetch(ENGINE_URL + "?v=" + Date.now(), { method: "HEAD", cache: "no-store" });
+      return r.headers.get("last-modified") || r.headers.get("etag") || null;
+    } catch (e) { return null; }
+  }
+  function showReloadBar() {
+    if (document.getElementById("lb-update")) return;
+    const bar = document.createElement("div");
+    bar.id = "lb-update";
+    bar.style.cssText = "position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:100000;background:#0071e3;color:#fff;font:600 13px -apple-system,system-ui,sans-serif;padding:9px 14px;border-radius:999px;box-shadow:0 6px 24px rgba(0,0,0,.25);display:flex;gap:12px;align-items:center";
+    const txt = document.createElement("span"); txt.textContent = "A newer version of LiteBoard is available.";
+    const btn = document.createElement("button"); btn.textContent = "Reload";
+    btn.style.cssText = "background:#fff;color:#0071e3;border:none;border-radius:999px;font:700 12px -apple-system,sans-serif;padding:5px 13px;cursor:pointer";
+    btn.onclick = () => location.reload();
+    bar.appendChild(txt); bar.appendChild(btn); document.body.appendChild(bar);
+  }
+  async function check() {
+    if (polling) return; polling = true;
+    const v = await stamp(); polling = false;
+    if (v == null) return;
+    if (loaded === null) { loaded = v; return; }   // first call sets the baseline
+    if (v !== loaded) showReloadBar();
+  }
+  check();
+  setInterval(check, 60000);
+  window.addEventListener("focus", check);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+  window.__lbVer = { stamp, check, showReloadBar };   // test hook
 }
 
 function renderAvatars(avEl, iframe) {
