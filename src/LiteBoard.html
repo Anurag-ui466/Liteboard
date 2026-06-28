@@ -331,23 +331,29 @@ function setCanvasBg(c){if(!B())return;B().bg=c;vp.style.backgroundColor=c;persi
 // remembered per browser in localStorage. Inner inputs (pen colour/size) are left interactive.
 function makeDraggable(el,key){
   function placeAt(l,t){var w=el.offsetWidth,h=el.offsetHeight;l=Math.min(innerWidth-w-4,Math.max(4,l));t=Math.min(innerHeight-h-4,Math.max(4,t));el.style.left=l+'px';el.style.top=t+'px';el.style.right='auto';el.style.bottom='auto';el.style.transform='none';}
-  try{var s=JSON.parse(localStorage.getItem(key)||'null');if(s)placeAt(s.l,s.t);}catch(e){}
+  try{var s=JSON.parse(localStorage.getItem(key)||'null');if(s&&isFinite(s.l)&&isFinite(s.t))placeAt(s.l,s.t);}catch(e){}
   var down=null,dragging=false,justDragged=false;
   el.addEventListener('pointerdown',function(e){if(e.button!==0)return;justDragged=false;var tg=(e.target.tagName||'').toLowerCase();if(tg==='input'||tg==='select'||tg==='textarea')return;var r=el.getBoundingClientRect();down={px:e.clientX,py:e.clientY,ox:e.clientX-r.left,oy:e.clientY-r.top};dragging=false;});
   el.addEventListener('pointermove',function(e){if(!down)return;if(!dragging){if(Math.abs(e.clientX-down.px)+Math.abs(e.clientY-down.py)<5)return;dragging=true;try{el.setPointerCapture(e.pointerId);}catch(_){}el.classList.add('dragging');}placeAt(e.clientX-down.ox,e.clientY-down.oy);});
-  el.addEventListener('pointerup',function(){if(dragging){justDragged=true;el.classList.remove('dragging');try{localStorage.setItem(key,JSON.stringify({l:parseInt(el.style.left),t:parseInt(el.style.top)}));}catch(_){}}down=null;dragging=false;});
+  function _end(){if(dragging){justDragged=true;try{localStorage.setItem(key,JSON.stringify({l:parseInt(el.style.left,10),t:parseInt(el.style.top,10)}));}catch(_){}}el.classList.remove('dragging');down=null;dragging=false;}
+  el.addEventListener('pointerup',_end);
+  el.addEventListener('pointercancel',_end);
   el.addEventListener('click',function(e){if(justDragged){e.stopPropagation();e.preventDefault();justDragged=false;}},true);
+  window.addEventListener('resize',function(){if(el.style.left&&el.style.left!=='auto')placeAt(parseFloat(el.style.left),parseFloat(el.style.top));});
 }
 (function(){
   ['rail','histbar','zoombar'].forEach(function(id){var el=document.getElementById(id);if(el)makeDraggable(el,'lb_pos_'+id);});
   var b=document.getElementById('bgcolorbtn');if(b){var key='lb_pos_bgcolor';
     function place(l,t){b.style.left=Math.min(innerWidth-b.offsetWidth-4,Math.max(4,l))+'px';b.style.top=Math.min(innerHeight-b.offsetHeight-4,Math.max(4,t))+'px';b.style.right='auto';b.style.bottom='auto';}
-    try{var s=JSON.parse(localStorage.getItem(key)||'null');if(s)place(s.l,s.t);}catch(e){}
+    try{var s=JSON.parse(localStorage.getItem(key)||'null');if(s&&isFinite(s.l)&&isFinite(s.t))place(s.l,s.t);}catch(e){}
     var d=null,mv=false;
     b.addEventListener('pointerdown',function(e){if(e.button!==0)return;var r=b.getBoundingClientRect();d={px:e.clientX,py:e.clientY,ox:e.clientX-r.left,oy:e.clientY-r.top};mv=false;});
     b.addEventListener('pointermove',function(e){if(!d)return;if(!mv){if(Math.abs(e.clientX-d.px)+Math.abs(e.clientY-d.py)<5)return;mv=true;try{b.setPointerCapture(e.pointerId);}catch(_){}b.classList.add('dragging');}place(e.clientX-d.ox,e.clientY-d.oy);});
-    b.addEventListener('pointerup',function(){if(mv){b.classList.remove('dragging');try{localStorage.setItem(key,JSON.stringify({l:parseInt(b.style.left),t:parseInt(b.style.top)}));}catch(_){}}d=null;});
+    function _bend(){if(mv){try{localStorage.setItem(key,JSON.stringify({l:parseInt(b.style.left,10),t:parseInt(b.style.top,10)}));}catch(_){}}b.classList.remove('dragging');d=null;}
+    b.addEventListener('pointerup',_bend);
+    b.addEventListener('pointercancel',_bend);
     b.addEventListener('click',function(e){if(mv){e.preventDefault();e.stopPropagation();mv=false;}},true);
+    window.addEventListener('resize',function(){if(b.style.left&&b.style.left!=='auto')place(parseFloat(b.style.left),parseFloat(b.style.top));});
   }
 })();
 function snap(){return JSON.stringify(doc)}

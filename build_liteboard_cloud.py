@@ -10,6 +10,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PRISTINE = os.path.join(HERE, "src", "LiteBoard.html")
 if not os.path.exists(PRISTINE):
     PRISTINE = r"D:\Claude test\miscellaneous\Skip-Bo Art Style\LiteBoard_src\LiteBoard.html"
+    print("WARN: in-repo src/LiteBoard.html missing — building from legacy external fallback:", PRISTINE)
 OUT = os.path.join(HERE, "web", "liteboard_cloud.html")
 
 with open(PRISTINE, "r", encoding="utf-8") as f:
@@ -385,6 +386,67 @@ assert "</body>" in app, "no </body> found"
 # the bootstrap into that string and breaking the whole script.
 _bidx = app.rfind("</body>")
 app = app[:_bidx] + BOOTSTRAP + app[_bidx:]
+
+# ---------------------------------------------------------------------------
+# Build hardening. Every patch above is a string match against the engine
+# source; if the source drifts, a replace silently no-ops and the cloud build
+# loses that behaviour (or, worse, ships broken JS — see the v1.5.0–v1.8.1
+# </body> regression). So before writing: (1) assert each patch actually took
+# effect, and (2) syntax-check every inline <script> in the output.
+# ---------------------------------------------------------------------------
+def _abort(msg):
+    raise SystemExit("BUILD ABORT: " + msg)
+
+# Each transform must leave a signature in the output (present), or remove one (absent).
+REQUIRED_PRESENT = [
+    ("try{canvas.insertBefore(buildFrame(f),ink);}catch", "crash-proof frame build"),
+    ("try{canvas.insertBefore(buildCard(c),ink);}catch", "crash-proof card build"),
+    ("PDFs cannot be added to the board", "PDF block"),
+    ('accept="image/*,video/*"', "media accept narrowed"),
+    ("_pp.dataset.paused", "GIF play/pause toggle"),
+    ("GX=256,GY=320;fs.forEach", "grid-arrange dropped images"),
+    ("GX=256,GY=320,bx=", "grid-arrange uploaded images"),
+    ("storage upload failed, embedding instead", "media-to-Storage upload"),
+    ("window.__bootLiteBoard=function()", "cloud boot hook"),
+    ("if(window.__cloudSave)window.__cloudSave(doc)", "cloud autosave wiring"),
+    ("window.__initRealtime", "realtime bootstrap"),
+    ('<script type="module">', "bootstrap module"),
+    ("function applyView", "engine intact (applyView)"),
+    ("function buildCard", "engine intact (buildCard)"),
+]
+REQUIRED_ABSENT = [
+    (">LiteBoard</b>", "brand wordmark stripped"),
+    ('onclick="save()"', "disk Save button removed"),
+    ("application/pdf,.pdf", "PDF upload accept removed"),
+]
+for _s, _label in REQUIRED_PRESENT:
+    if _s not in app:
+        _abort(f"rule did not apply: {_label} — its anchor drifted in the engine source. Update build_liteboard_cloud.py.")
+for _s, _label in REQUIRED_ABSENT:
+    if _s in app:
+        _abort(f"rule did not apply: {_label} — the target is still present in the output.")
+if not app.rstrip().endswith("</html>"):
+    _abort("output does not end with </html> — document structure is broken.")
+
+# Syntax-check every inline <script> so a broken build can never ship silently
+# (would have caught the </body>-spliced-into-a-string regression immediately).
+import shutil, subprocess, tempfile
+_node = shutil.which("node")
+if not _node:
+    print("WARN: 'node' not on PATH — skipped JS syntax validation of the built file.")
+else:
+    _checked = 0
+    for _attrs, _body in re.findall(r"<script\b([^>]*)>([\s\S]*?)</script>", app):
+        if "src=" in _attrs or not _body.strip():
+            continue
+        _tf = tempfile.NamedTemporaryFile("w", suffix=(".mjs" if "module" in _attrs else ".js"), delete=False, encoding="utf-8")
+        _tf.write(_body); _tf.close()
+        _r = subprocess.run([_node, "--check", _tf.name], capture_output=True, text=True)
+        os.unlink(_tf.name)
+        _checked += 1
+        if _r.returncode != 0:
+            _abort(f"generated <script> #{_checked} has a JS syntax error:\n{_r.stderr.strip()[:1200]}")
+    print(f"validated {_checked} inline <script> block(s) - all parse OK")
 
 with open(OUT, "w", encoding="utf-8") as f:
     f.write(app)
