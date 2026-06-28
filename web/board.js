@@ -52,7 +52,7 @@ async function main() {
       <button class="newbtn" id="share">${amOwner ? "Share" : "Members"}</button>
       <div class="who">${amOwner ? "owner" : (canEdit ? "editor" : "viewer")}</div>
     </div>
-    <iframe id="canvas" src="liteboard_cloud.html?id=${encodeURIComponent(id)}"
+    <iframe id="canvas" src="liteboard_cloud.html?id=${encodeURIComponent(id)}&_=${Date.now()}"
       style="width:100%;height:calc(100vh - 55px);border:0;display:block;background:#f5f5f7"></iframe>`;
 
   document.getElementById("share").onclick = () => openMembers(sb, id);
