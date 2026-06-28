@@ -628,306 +628,7 @@ function buildSnapshotHTML(){
   var title=((B()&&B().name)||'LiteBoard');
   return '<!doctype html>\n<html><head><meta charset="utf-8"><title>'+title.replace(/[&<>]/g,'')+'</title>\n<style>\n'+css+'\n</style>\n'
     +'<style>html,body{margin:0;background:#f5f5f7}#snap{position:relative;width:'+Math.ceil(b.w)+'px;height:'+Math.ceil(b.h)+'px;margin:18px auto;overflow:hidden}</style></head>\n'
-    +'<body><div id="snap">'+clone.outerHTML+'</div>
-<script>
-/* Realtime (M3): presence cursors + live document sync over Supabase Realtime.
-   Operation model: whole-doc broadcast + last-write-wins (right-sized for this stage;
-   CRDT/Yjs is the future hardening for heavy simultaneous same-object editing). */
-window.__initRealtime = function(sb, boardId, me, myName, canEdit){
-  if (typeof vp === "undefined" || typeof B !== "function" || typeof toCanvas !== "function") {
-    console.warn("realtime: canvas globals not ready"); return;
-  }
-  var COLORS = ["#0071e3","#ff3b30","#34c759","#ff9500","#af52de","#ff2d55","#5ac8fa","#ffcc00"];
-  var hsh=0; for (var i=0;i<me.length;i++) hsh=(hsh*31+me.charCodeAt(i))|0;
-  var myColor = COLORS[Math.abs(hsh)%COLORS.length];
-
-  var layer = document.createElement("div");
-  layer.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:90;overflow:hidden";
-  document.body.appendChild(layer);
-  var peers = {};
-  function ensurePeer(uid,color,nm){
-    if (peers[uid]) return peers[uid];
-    var d = document.createElement("div");
-    d.style.cssText = "position:absolute;left:-999px;top:-999px;will-change:left,top;transition:left .09s linear,top .09s linear";
-    d.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))"><path d="M4 2l16 8.5-7.2 1.2L9 19z" fill="'+color+'" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg><span style="position:absolute;left:18px;top:12px;background:'+color+';color:#fff;font:600 11px/1.5 -apple-system,sans-serif;padding:1px 7px;border-radius:9px;white-space:nowrap">'+nm+'</span>';
-    layer.appendChild(d);
-    return (peers[uid] = { el:d, bx:0, by:0, t:Date.now() });
-  }
-  function place(){
-    var r = vp.getBoundingClientRect(), v = B().view;
-    for (var uid in peers){ var p = peers[uid];
-      var sx = p.bx*v.k + v.x + r.left, sy = p.by*v.k + v.y + r.top;
-      var off = (sx < r.left-30 || sx > r.right+30 || sy < r.top-30 || sy > r.bottom+30);
-      p.el.style.display = off ? "none" : "block";
-      p.el.style.left = sx + "px"; p.el.style.top = sy + "px";
-    }
-    requestAnimationFrame(place);
-  }
-  requestAnimationFrame(place);
-
-  // presence -> parent topbar avatars (no in-canvas badge); follow support
-  var followId = null;
-  function postPresence(){
-    var st = channel.presenceState(), users = [];
-    for (var k in st){ var meta = (st[k] && st[k][0]) || {}; users.push({ id:k, name:meta.name||"guest", color:meta.color||"#8e8e93", me:(k===me) }); }
-    try { window.parent.postMessage({ type:"lb-presence", users:users }, "*"); } catch(e){}
-  }
-  window.addEventListener("message", function(ev){
-    var d = ev.data || {};
-    if (d.type === "lb-follow") followId = d.userId;
-    else if (d.type === "lb-unfollow") followId = null;
-    else if (d.type === "lb-request-presence") postPresence();
-  });
-
-  var applyingRemote = false;
-  var channel = sb.channel("board:"+boardId, { config: { broadcast:{ self:false }, presence:{ key: me } } });
-
-  channel.on("broadcast", { event:"cursor" }, function(m){
-    var p = m.payload; if (!p || p.id===me) return;
-    var pr = ensurePeer(p.id, p.color||myColor, p.name||"guest");
-    pr.bx = p.bx; pr.by = p.by; pr.t = Date.now();
-  });
-  // Granular apply: update only changed objects in place (no full re-render / image reload),
-  // and never clobber an object the local user is currently editing.
-  var __sigs = {};
-  function posEl(el, o){ el.style.left=o.x+"px"; el.style.top=o.y+"px"; if(o.w)el.style.width=o.w+"px"; if(o.h)el.style.height=o.h+"px"; }
-  function reconcile(o, isFrame){
-    var el = canvas.querySelector('[data-id="'+o.id+'"]');
-    var rest = JSON.stringify(Object.assign({}, o, { x:0, y:0, w:0, h:0 }));  // signature ignoring geometry
-    if (!el){ el = isFrame ? buildFrame(o) : buildCard(o); canvas.insertBefore(el, ink); posEl(el,o); __sigs[o.id]=rest; return; }
-    posEl(el, o);                                  // geometry is always a cheap move/resize
-    if (__sigs[o.id] === rest) return;             // nothing else changed
-    if (el.contains(document.activeElement)){ __sigs[o.id]=rest; return; }  // user is editing it — leave it alone
-    el.replaceWith(isFrame ? buildFrame(o) : buildCard(o));   // content changed — rebuild just this node
-    __sigs[o.id]=rest;
-  }
-  function applyDocGranular(inc){
-    if (!inc || !inc.pages || !inc.pages.length) return;
-    var keepCur = doc.cur, keepView = (B() ? B().view : null);
-    doc = inc;
-    doc.cur = (doc.pages[keepCur]) ? keepCur : Math.min(keepCur, doc.pages.length-1);
-    if (keepView && doc.pages[doc.cur]) doc.pages[doc.cur].view = keepView;
-    if (typeof normalize === "function") normalize();
-    var page = doc.pages[doc.cur];
-    if (page && page.kind) {            // sheet page (task list etc.) — re-render whole sheet live,
-      var ae = document.activeElement;  // but never while THIS user is typing in a cell
-      var editing = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable) && ae.closest && ae.closest("#sheet");
-      if (!editing && typeof render === "function") render();
-      if (typeof histSnap === "function") lastSnap = histSnap();
-      return;
-    }
-    var cards = page.cards||[], frames = page.frames||[];
-    var want = {}; frames.forEach(function(f){ want[f.id]=1; }); cards.forEach(function(c){ want[c.id]=1; });
-    canvas.querySelectorAll(".card,.frame").forEach(function(el){ if(!want[el.dataset.id]){ el.remove(); delete __sigs[el.dataset.id]; } });
-    frames.forEach(function(f){ reconcile(f, true); });
-    cards.forEach(function(c){ reconcile(c, false); });
-    if (typeof renderInk==="function") renderInk();
-    if (typeof applyView==="function") applyView();
-    if (typeof renderTabs==="function") renderTabs();
-    if (typeof applySel==="function") applySel();
-    if (typeof histSnap==="function") lastSnap = histSnap();
-  }
-  channel.on("broadcast", { event:"doc" }, function(m){
-    var p = m.payload; if (!p || p.id===me || !p.doc || !p.doc.pages || !p.doc.pages.length) return;
-    applyingRemote = true;
-    try { applyDocGranular(p.doc); }
-    catch(e){ console.warn("realtime apply failed, full render:", e); if (typeof render==="function") render(); }
-    applyingRemote = false;
-  });
-  channel.on("broadcast", { event:"drag" }, function(m){
-    var p = m.payload; if (!p || p.id===me || !p.items) return;
-    var all = B().cards.concat(B().frames || []);
-    for (var i=0;i<p.items.length;i++){ var it = p.items[i];
-      var el = canvas.querySelector('[data-id="'+it.id+'"]');
-      if (el){ el.style.left = it.x+"px"; el.style.top = it.y+"px"; }
-      for (var j=0;j<all.length;j++){ if (all[j].id===it.id){ all[j].x=it.x; all[j].y=it.y; break; } }
-    }
-  });
-  channel.on("presence", { event:"sync" }, function(){
-    var st = channel.presenceState(), ids = Object.keys(st), online = {};
-    ids.forEach(function(k){ online[k]=1; });
-    for (var uid in peers){ if (!online[uid]) { peers[uid].el.remove(); delete peers[uid]; } }
-    postPresence();
-  });
-  channel.on("broadcast", { event:"view" }, function(m){
-    var p = m.payload; if (!p || !followId || p.id !== followId) return;
-    var r = vp.getBoundingClientRect(), v = B().view;
-    v.k = p.vk; v.x = r.width/2 - p.vcx*p.vk; v.y = r.height/2 - p.vcy*p.vk;
-    if (typeof applyView === "function") applyView();
-  });
-  channel.subscribe(function(status){
-    if (status === "SUBSCRIBED") { channel.track({ id: me, name: myName, color: myColor }); postPresence(); }
-  });
-  // broadcast my viewport so followers can track what I'm looking at
-  setInterval(function(){
-    var r = vp.getBoundingClientRect(), v = B().view;
-    channel.send({ type:"broadcast", event:"view", payload:{ id:me, vcx:(r.width/2 - v.x)/v.k, vcy:(r.height/2 - v.y)/v.k, vk:v.k } });
-  }, 250);
-
-  var lastSent = 0;
-  vp.addEventListener("mousemove", function(e){
-    var now = Date.now(); if (now - lastSent < 55) return; lastSent = now;
-    var b = toCanvas(e.clientX, e.clientY);
-    channel.send({ type:"broadcast", event:"cursor", payload:{ id:me, name:myName, color:myColor, bx:b.x, by:b.y } });
-  });
-
-  // stream object positions WHILE dragging, so others see them glide (Miro feel)
-  var dragging = false, lastDrag = 0;
-  vp.addEventListener("pointerdown", function(){ dragging = true;
-    if (followId){ followId = null; try { window.parent.postMessage({ type:"lb-followStopped" }, "*"); } catch(e){} }
-  }, true);
-  window.addEventListener("pointerup", function(){ dragging = false; }, true);
-  vp.addEventListener("pointermove", function(){
-    if (!dragging || !canEdit || applyingRemote) return;
-    if (typeof selectedIds === "undefined" || !selectedIds || !selectedIds.size) return;
-    var now = Date.now(); if (now - lastDrag < 40) return; lastDrag = now;
-    var items = [];
-    B().cards.forEach(function(c){ if (selectedIds.has(c.id)) items.push({ id:c.id, x:c.x, y:c.y }); });
-    (B().frames||[]).forEach(function(f){ if (selectedIds.has(f.id)) items.push({ id:f.id, x:f.x, y:f.y }); });
-    if (items.length) channel.send({ type:"broadcast", event:"drag", payload:{ id:me, items:items } });
-  });
-
-  if (canEdit){
-    var bt = null, bp = null;
-    window.__cloudBroadcast = function(d){
-      if (applyingRemote) return;          // never echo a remote-applied change
-      bp = d; if (bt) return;
-      bt = setTimeout(function(){ bt = null;
-        try { var s = JSON.stringify(bp); if (s.length < 200000) channel.send({ type:"broadcast", event:"doc", payload:{ id:me, doc:bp } }); } catch(e){}
-      }, 250);
-    };
-  }
-  setInterval(function(){ var now=Date.now(); for (var uid in peers){ if (now-peers[uid].t > 20000){ peers[uid].el.remove(); delete peers[uid]; } } }, 5000);
-
-  // ---- viewport virtualization (#2): hide off-screen cards/frames so the browser skips their
-  // layout/paint and their images don't load until panned into view. Nodes stay in the DOM, so
-  // selection / realtime / editing all keep working; selected or focused nodes are never hidden.
-  function __objById(idv){ var a=B().cards||[]; for(var i=0;i<a.length;i++) if(a[i].id===idv) return a[i]; var f=B().frames||[]; for(var j=0;j<f.length;j++) if(f[j].id===idv) return f[j]; return null; }
-  function cullCards(){
-    try {
-      if (!B() || B().kind) return;                 // sheets aren't a canvas
-      var r = vp.getBoundingClientRect(), v = B().view, m = 700;   // 700px board-space buffer
-      var x0 = -v.x/v.k - m, y0 = -v.y/v.k - m, x1 = x0 + r.width/v.k + 2*m, y1 = y0 + r.height/v.k + 2*m;
-      var nodes = canvas.querySelectorAll(".card,.frame");
-      for (var i=0;i<nodes.length;i++){ var el = nodes[i];
-        if (el.classList.contains("sel") || el.contains(document.activeElement)) { el.style.display=""; continue; }
-        var o = __objById(el.dataset.id); if (!o) { el.style.display=""; continue; }
-        var w = o.w || 220, h = o.h || el.offsetHeight || 180;
-        el.style.display = (o.x > x1 || o.x + w < x0 || o.y > y1 || o.y + h < y0) ? "none" : "";
-      }
-    } catch(e){}
-  }
-  window.__cullCards = cullCards;
-  var _origApplyView = window.applyView, _cullT = 0;
-  window.applyView = function(){ if (_origApplyView) _origApplyView.apply(this, arguments); if (_cullT) return; _cullT = setTimeout(function(){ _cullT = 0; cullCards(); }, 90); };
-  setTimeout(cullCards, 300);
-
-  // one-time: move any EMBEDDED (base64) images to Storage so a pre-Storage board gets light + can save.
-  if (canEdit && window.__cloudUpload) {
-    setTimeout(async function(){
-      try {
-        var imgs = [];
-        (doc.pages||[]).forEach(function(p){ (p.cards||[]).forEach(function(c){ if (c.type==="image" && typeof c.src==="string" && c.src.indexOf("data:image")===0) imgs.push(c); }); });
-        if (!imgs.length) return;
-        var tag = document.createElement("div");
-        tag.style.cssText = "position:fixed;bottom:12px;left:12px;z-index:99999;background:#0071e3;color:#fff;font:600 12px -apple-system,sans-serif;padding:6px 12px;border-radius:999px";
-        tag.textContent = "optimizing " + imgs.length + " image(s)\u2026"; document.body.appendChild(tag);
-        var done = 0;
-        for (var i=0;i<imgs.length;i++){ var c = imgs[i];
-          try { var blob = await (await fetch(c.src)).blob(); c.src = await window.__cloudUpload(blob, c.title||"img"); done++; tag.textContent = "optimizing " + done + "/" + imgs.length + " image(s)\u2026"; }
-          catch(e){ console.warn("migrate image failed", e); }
-        }
-        tag.remove();
-        if (done){ try { if (typeof persist==="function") persist(); if (typeof render==="function") render(); } catch(e){}
-          var ok = document.createElement("div");
-          ok.style.cssText = "position:fixed;bottom:12px;left:12px;z-index:99999;background:#34c759;color:#fff;font:600 12px -apple-system,sans-serif;padding:6px 12px;border-radius:999px";
-          ok.textContent = done + " image(s) moved to storage \u2014 board is lighter"; document.body.appendChild(ok);
-          setTimeout(function(){ ok.remove(); }, 4000);
-        }
-      } catch(e){ console.warn("image migration pass failed", e); }
-    }, 1500);
-  }
-};
-</script>
-<script src="supabase.js"></script>
-<script type="module">
-import { SUPABASE_URL, SUPABASE_ANON_KEY, DEV_AUTOLOGIN, DEV_EMAIL, DEV_PASSWORD } from "./config.js";
-const { createClient } = window.supabase;
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const id = new URLSearchParams(location.search).get("id");
-function fail(msg){ document.body.innerHTML = '<p style="padding:24px;font:14px -apple-system,sans-serif;color:#86868b">'+msg+'</p>'; }
-function banner(text, color){ const b=document.createElement('div'); b.textContent=text;
-  b.style.cssText='position:fixed;top:10px;right:12px;z-index:99999;background:'+color+';color:#fff;font:12px -apple-system,sans-serif;font-weight:600;padding:5px 12px;border-radius:999px;box-shadow:0 2px 8px rgba(0,0,0,.2)';
-  document.body.appendChild(b); return b; }
-// crash-proofing: never let an uncaught error kill the canvas silently
-window.addEventListener("error", function(e){ try{ console.warn("LiteBoard error:", e.message); }catch(_){} });
-window.addEventListener("unhandledrejection", function(e){ try{ console.warn("LiteBoard rejection:", (e.reason&&e.reason.message)||e.reason); }catch(_){} });
-(async () => {
-  if (!id) return fail("No board id.");
-  let { data: { session } } = await sb.auth.getSession();
-  if (!session && DEV_AUTOLOGIN) {
-    await sb.auth.signInWithPassword({ email: DEV_EMAIL, password: DEV_PASSWORD });
-    session = (await sb.auth.getSession()).data.session;
-  }
-  if (!session) return fail("Not signed in.");
-  const me = session.user.id;
-  const { data: board, error } = await sb.from("boards").select("id,doc,owner_id").eq("id", id).single();
-  if (error || !board) return fail("Board not found, or you don't have access.");
-  let canEdit = board.owner_id === me;
-  if (!canEdit) {
-    const { data: m } = await sb.from("board_members").select("role").eq("board_id", id).eq("user_id", me).maybeSingle();
-    canEdit = m?.role === "editor";
-  }
-  window.__CLOUD_DOC = (board.doc && board.doc.pages && board.doc.pages.length) ? board.doc : undefined;
-  if (canEdit) {
-    // Upload media to Supabase Storage and return a URL (Miro-style: keep the board light).
-    window.__cloudUpload = async (blob, name) => {
-      const safe = (name || "img").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 40);
-      const path = id + "/" + Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "_" + safe;
-      const { error } = await sb.storage.from("board-media").upload(path, blob, { contentType: blob.type || "image/jpeg", upsert: false });
-      if (error) throw error;
-      return sb.storage.from("board-media").getPublicUrl(path).data.publicUrl;
-    };
-    // Silent background save (Miro-style): debounced, async, coalesced, with retry.
-    // No success UI. A small notice appears ONLY if a save fails, so work is never lost silently.
-    let timer = null, pending = null, saving = false, errTag = null;
-    function thumbFromDoc(dc){ try { var p = dc.pages && dc.pages[dc.cur||0]; if(!p||!p.cards) return null;
-      var urls=[]; for(var i=0;i<p.cards.length && urls.length<4;i++){ var c=p.cards[i]; if(c.type==="image"&&c.src&&(/^https?:/.test(c.src)||c.src.length<150000)) urls.push(c.src); } return urls.length ? JSON.stringify(urls) : null; } catch(e){ return null; } }
-    const flush = async () => {
-      if (saving || pending === null) return;
-      const d = JSON.parse(JSON.stringify(pending)); pending = null; saving = true;
-      try { if (JSON.stringify(d).length > 8000000) { saving = false; if (!errTag) errTag = banner("board too large to save \u2014 remove some heavy media", "#ff3b30"); console.warn("doc exceeds 8MB, skipping save"); return; } } catch (_) {}
-      const { error } = await sb.from("boards").update({ doc: d, thumbnail: thumbFromDoc(d) }).eq("id", id);
-      saving = false;
-      if (error) {
-        console.warn("LiteBoard save failed, retrying:", error.message);
-        pending = d;
-        if (!errTag) errTag = banner("can\u2019t save \u2014 retrying", "#ff3b30");
-        setTimeout(flush, 3000);
-      } else {
-        if (errTag) { errTag.remove(); errTag = null; }
-        // #4: throttled version-history snapshot (~1 per 2 min of editing); fire-and-forget
-        try { var _nt = Date.now(); if (!window.__lastHist || _nt - window.__lastHist > 120000) { window.__lastHist = _nt; sb.from("board_history").insert({ board_id: id, doc: d, saved_by: me }); } } catch(e){}
-        if (pending !== null) flush();
-      }
-    };
-    window.__cloudSave = (doc) => {
-      if (window.__cloudBroadcast) window.__cloudBroadcast(doc); // live realtime push (M3)
-      pending = doc;
-      if (timer) return;
-      timer = setTimeout(() => { timer = null; flush(); }, 1000);
-    };
-  } else {
-    window.__cloudSave = () => {};
-    banner("view only", "#8e8e93");
-  }
-  try { window.__bootLiteBoard && window.__bootLiteBoard(); }
-  catch (e) { console.warn("board render failed:", e); banner("Couldn't fully load this board — try reloading", "#ff9500"); }
-  const myName = (session.user.email || "someone").split("@")[0];
-  if (window.__initRealtime) window.__initRealtime(sb, id, me, myName, canEdit);
-})();
-</script>
-</body></html>';
+    +'<body><div id="snap">'+clone.outerHTML+'</div></body></html>';
 }
 async function exportSnapshot(){
   flushEdits();
@@ -1238,6 +939,305 @@ function renderTaskSheet(host){
 
 // ---------- boot ----------
 window.__bootLiteBoard=function(){try{doc=(window.__CLOUD_DOC&&window.__CLOUD_DOC.pages&&window.__CLOUD_DOC.pages.length)?window.__CLOUD_DOC:defaultDoc();}catch(e){doc=defaultDoc();}normalize();lastSnap=histSnap();render();};
+</script>
+
+<script>
+/* Realtime (M3): presence cursors + live document sync over Supabase Realtime.
+   Operation model: whole-doc broadcast + last-write-wins (right-sized for this stage;
+   CRDT/Yjs is the future hardening for heavy simultaneous same-object editing). */
+window.__initRealtime = function(sb, boardId, me, myName, canEdit){
+  if (typeof vp === "undefined" || typeof B !== "function" || typeof toCanvas !== "function") {
+    console.warn("realtime: canvas globals not ready"); return;
+  }
+  var COLORS = ["#0071e3","#ff3b30","#34c759","#ff9500","#af52de","#ff2d55","#5ac8fa","#ffcc00"];
+  var hsh=0; for (var i=0;i<me.length;i++) hsh=(hsh*31+me.charCodeAt(i))|0;
+  var myColor = COLORS[Math.abs(hsh)%COLORS.length];
+
+  var layer = document.createElement("div");
+  layer.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:90;overflow:hidden";
+  document.body.appendChild(layer);
+  var peers = {};
+  function ensurePeer(uid,color,nm){
+    if (peers[uid]) return peers[uid];
+    var d = document.createElement("div");
+    d.style.cssText = "position:absolute;left:-999px;top:-999px;will-change:left,top;transition:left .09s linear,top .09s linear";
+    d.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))"><path d="M4 2l16 8.5-7.2 1.2L9 19z" fill="'+color+'" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg><span style="position:absolute;left:18px;top:12px;background:'+color+';color:#fff;font:600 11px/1.5 -apple-system,sans-serif;padding:1px 7px;border-radius:9px;white-space:nowrap">'+nm+'</span>';
+    layer.appendChild(d);
+    return (peers[uid] = { el:d, bx:0, by:0, t:Date.now() });
+  }
+  function place(){
+    var r = vp.getBoundingClientRect(), v = B().view;
+    for (var uid in peers){ var p = peers[uid];
+      var sx = p.bx*v.k + v.x + r.left, sy = p.by*v.k + v.y + r.top;
+      var off = (sx < r.left-30 || sx > r.right+30 || sy < r.top-30 || sy > r.bottom+30);
+      p.el.style.display = off ? "none" : "block";
+      p.el.style.left = sx + "px"; p.el.style.top = sy + "px";
+    }
+    requestAnimationFrame(place);
+  }
+  requestAnimationFrame(place);
+
+  // presence -> parent topbar avatars (no in-canvas badge); follow support
+  var followId = null;
+  function postPresence(){
+    var st = channel.presenceState(), users = [];
+    for (var k in st){ var meta = (st[k] && st[k][0]) || {}; users.push({ id:k, name:meta.name||"guest", color:meta.color||"#8e8e93", me:(k===me) }); }
+    try { window.parent.postMessage({ type:"lb-presence", users:users }, "*"); } catch(e){}
+  }
+  window.addEventListener("message", function(ev){
+    var d = ev.data || {};
+    if (d.type === "lb-follow") followId = d.userId;
+    else if (d.type === "lb-unfollow") followId = null;
+    else if (d.type === "lb-request-presence") postPresence();
+  });
+
+  var applyingRemote = false;
+  var channel = sb.channel("board:"+boardId, { config: { broadcast:{ self:false }, presence:{ key: me } } });
+
+  channel.on("broadcast", { event:"cursor" }, function(m){
+    var p = m.payload; if (!p || p.id===me) return;
+    var pr = ensurePeer(p.id, p.color||myColor, p.name||"guest");
+    pr.bx = p.bx; pr.by = p.by; pr.t = Date.now();
+  });
+  // Granular apply: update only changed objects in place (no full re-render / image reload),
+  // and never clobber an object the local user is currently editing.
+  var __sigs = {};
+  function posEl(el, o){ el.style.left=o.x+"px"; el.style.top=o.y+"px"; if(o.w)el.style.width=o.w+"px"; if(o.h)el.style.height=o.h+"px"; }
+  function reconcile(o, isFrame){
+    var el = canvas.querySelector('[data-id="'+o.id+'"]');
+    var rest = JSON.stringify(Object.assign({}, o, { x:0, y:0, w:0, h:0 }));  // signature ignoring geometry
+    if (!el){ el = isFrame ? buildFrame(o) : buildCard(o); canvas.insertBefore(el, ink); posEl(el,o); __sigs[o.id]=rest; return; }
+    posEl(el, o);                                  // geometry is always a cheap move/resize
+    if (__sigs[o.id] === rest) return;             // nothing else changed
+    if (el.contains(document.activeElement)){ __sigs[o.id]=rest; return; }  // user is editing it — leave it alone
+    el.replaceWith(isFrame ? buildFrame(o) : buildCard(o));   // content changed — rebuild just this node
+    __sigs[o.id]=rest;
+  }
+  function applyDocGranular(inc){
+    if (!inc || !inc.pages || !inc.pages.length) return;
+    var keepCur = doc.cur, keepView = (B() ? B().view : null);
+    doc = inc;
+    doc.cur = (doc.pages[keepCur]) ? keepCur : Math.min(keepCur, doc.pages.length-1);
+    if (keepView && doc.pages[doc.cur]) doc.pages[doc.cur].view = keepView;
+    if (typeof normalize === "function") normalize();
+    var page = doc.pages[doc.cur];
+    if (page && page.kind) {            // sheet page (task list etc.) — re-render whole sheet live,
+      var ae = document.activeElement;  // but never while THIS user is typing in a cell
+      var editing = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable) && ae.closest && ae.closest("#sheet");
+      if (!editing && typeof render === "function") render();
+      if (typeof histSnap === "function") lastSnap = histSnap();
+      return;
+    }
+    var cards = page.cards||[], frames = page.frames||[];
+    var want = {}; frames.forEach(function(f){ want[f.id]=1; }); cards.forEach(function(c){ want[c.id]=1; });
+    canvas.querySelectorAll(".card,.frame").forEach(function(el){ if(!want[el.dataset.id]){ el.remove(); delete __sigs[el.dataset.id]; } });
+    frames.forEach(function(f){ reconcile(f, true); });
+    cards.forEach(function(c){ reconcile(c, false); });
+    if (typeof renderInk==="function") renderInk();
+    if (typeof applyView==="function") applyView();
+    if (typeof renderTabs==="function") renderTabs();
+    if (typeof applySel==="function") applySel();
+    if (typeof histSnap==="function") lastSnap = histSnap();
+  }
+  channel.on("broadcast", { event:"doc" }, function(m){
+    var p = m.payload; if (!p || p.id===me || !p.doc || !p.doc.pages || !p.doc.pages.length) return;
+    applyingRemote = true;
+    try { applyDocGranular(p.doc); }
+    catch(e){ console.warn("realtime apply failed, full render:", e); if (typeof render==="function") render(); }
+    applyingRemote = false;
+  });
+  channel.on("broadcast", { event:"drag" }, function(m){
+    var p = m.payload; if (!p || p.id===me || !p.items) return;
+    var all = B().cards.concat(B().frames || []);
+    for (var i=0;i<p.items.length;i++){ var it = p.items[i];
+      var el = canvas.querySelector('[data-id="'+it.id+'"]');
+      if (el){ el.style.left = it.x+"px"; el.style.top = it.y+"px"; }
+      for (var j=0;j<all.length;j++){ if (all[j].id===it.id){ all[j].x=it.x; all[j].y=it.y; break; } }
+    }
+  });
+  channel.on("presence", { event:"sync" }, function(){
+    var st = channel.presenceState(), ids = Object.keys(st), online = {};
+    ids.forEach(function(k){ online[k]=1; });
+    for (var uid in peers){ if (!online[uid]) { peers[uid].el.remove(); delete peers[uid]; } }
+    postPresence();
+  });
+  channel.on("broadcast", { event:"view" }, function(m){
+    var p = m.payload; if (!p || !followId || p.id !== followId) return;
+    var r = vp.getBoundingClientRect(), v = B().view;
+    v.k = p.vk; v.x = r.width/2 - p.vcx*p.vk; v.y = r.height/2 - p.vcy*p.vk;
+    if (typeof applyView === "function") applyView();
+  });
+  channel.subscribe(function(status){
+    if (status === "SUBSCRIBED") { channel.track({ id: me, name: myName, color: myColor }); postPresence(); }
+  });
+  // broadcast my viewport so followers can track what I'm looking at
+  setInterval(function(){
+    var r = vp.getBoundingClientRect(), v = B().view;
+    channel.send({ type:"broadcast", event:"view", payload:{ id:me, vcx:(r.width/2 - v.x)/v.k, vcy:(r.height/2 - v.y)/v.k, vk:v.k } });
+  }, 250);
+
+  var lastSent = 0;
+  vp.addEventListener("mousemove", function(e){
+    var now = Date.now(); if (now - lastSent < 55) return; lastSent = now;
+    var b = toCanvas(e.clientX, e.clientY);
+    channel.send({ type:"broadcast", event:"cursor", payload:{ id:me, name:myName, color:myColor, bx:b.x, by:b.y } });
+  });
+
+  // stream object positions WHILE dragging, so others see them glide (Miro feel)
+  var dragging = false, lastDrag = 0;
+  vp.addEventListener("pointerdown", function(){ dragging = true;
+    if (followId){ followId = null; try { window.parent.postMessage({ type:"lb-followStopped" }, "*"); } catch(e){} }
+  }, true);
+  window.addEventListener("pointerup", function(){ dragging = false; }, true);
+  vp.addEventListener("pointermove", function(){
+    if (!dragging || !canEdit || applyingRemote) return;
+    if (typeof selectedIds === "undefined" || !selectedIds || !selectedIds.size) return;
+    var now = Date.now(); if (now - lastDrag < 40) return; lastDrag = now;
+    var items = [];
+    B().cards.forEach(function(c){ if (selectedIds.has(c.id)) items.push({ id:c.id, x:c.x, y:c.y }); });
+    (B().frames||[]).forEach(function(f){ if (selectedIds.has(f.id)) items.push({ id:f.id, x:f.x, y:f.y }); });
+    if (items.length) channel.send({ type:"broadcast", event:"drag", payload:{ id:me, items:items } });
+  });
+
+  if (canEdit){
+    var bt = null, bp = null;
+    window.__cloudBroadcast = function(d){
+      if (applyingRemote) return;          // never echo a remote-applied change
+      bp = d; if (bt) return;
+      bt = setTimeout(function(){ bt = null;
+        try { var s = JSON.stringify(bp); if (s.length < 200000) channel.send({ type:"broadcast", event:"doc", payload:{ id:me, doc:bp } }); } catch(e){}
+      }, 250);
+    };
+  }
+  setInterval(function(){ var now=Date.now(); for (var uid in peers){ if (now-peers[uid].t > 20000){ peers[uid].el.remove(); delete peers[uid]; } } }, 5000);
+
+  // ---- viewport virtualization (#2): hide off-screen cards/frames so the browser skips their
+  // layout/paint and their images don't load until panned into view. Nodes stay in the DOM, so
+  // selection / realtime / editing all keep working; selected or focused nodes are never hidden.
+  function __objById(idv){ var a=B().cards||[]; for(var i=0;i<a.length;i++) if(a[i].id===idv) return a[i]; var f=B().frames||[]; for(var j=0;j<f.length;j++) if(f[j].id===idv) return f[j]; return null; }
+  function cullCards(){
+    try {
+      if (!B() || B().kind) return;                 // sheets aren't a canvas
+      var r = vp.getBoundingClientRect(), v = B().view, m = 700;   // 700px board-space buffer
+      var x0 = -v.x/v.k - m, y0 = -v.y/v.k - m, x1 = x0 + r.width/v.k + 2*m, y1 = y0 + r.height/v.k + 2*m;
+      var nodes = canvas.querySelectorAll(".card,.frame");
+      for (var i=0;i<nodes.length;i++){ var el = nodes[i];
+        if (el.classList.contains("sel") || el.contains(document.activeElement)) { el.style.display=""; continue; }
+        var o = __objById(el.dataset.id); if (!o) { el.style.display=""; continue; }
+        var w = o.w || 220, h = o.h || el.offsetHeight || 180;
+        el.style.display = (o.x > x1 || o.x + w < x0 || o.y > y1 || o.y + h < y0) ? "none" : "";
+      }
+    } catch(e){}
+  }
+  window.__cullCards = cullCards;
+  var _origApplyView = window.applyView, _cullT = 0;
+  window.applyView = function(){ if (_origApplyView) _origApplyView.apply(this, arguments); if (_cullT) return; _cullT = setTimeout(function(){ _cullT = 0; cullCards(); }, 90); };
+  setTimeout(cullCards, 300);
+
+  // one-time: move any EMBEDDED (base64) images to Storage so a pre-Storage board gets light + can save.
+  if (canEdit && window.__cloudUpload) {
+    setTimeout(async function(){
+      try {
+        var imgs = [];
+        (doc.pages||[]).forEach(function(p){ (p.cards||[]).forEach(function(c){ if (c.type==="image" && typeof c.src==="string" && c.src.indexOf("data:image")===0) imgs.push(c); }); });
+        if (!imgs.length) return;
+        var tag = document.createElement("div");
+        tag.style.cssText = "position:fixed;bottom:12px;left:12px;z-index:99999;background:#0071e3;color:#fff;font:600 12px -apple-system,sans-serif;padding:6px 12px;border-radius:999px";
+        tag.textContent = "optimizing " + imgs.length + " image(s)\u2026"; document.body.appendChild(tag);
+        var done = 0;
+        for (var i=0;i<imgs.length;i++){ var c = imgs[i];
+          try { var blob = await (await fetch(c.src)).blob(); c.src = await window.__cloudUpload(blob, c.title||"img"); done++; tag.textContent = "optimizing " + done + "/" + imgs.length + " image(s)\u2026"; }
+          catch(e){ console.warn("migrate image failed", e); }
+        }
+        tag.remove();
+        if (done){ try { if (typeof persist==="function") persist(); if (typeof render==="function") render(); } catch(e){}
+          var ok = document.createElement("div");
+          ok.style.cssText = "position:fixed;bottom:12px;left:12px;z-index:99999;background:#34c759;color:#fff;font:600 12px -apple-system,sans-serif;padding:6px 12px;border-radius:999px";
+          ok.textContent = done + " image(s) moved to storage \u2014 board is lighter"; document.body.appendChild(ok);
+          setTimeout(function(){ ok.remove(); }, 4000);
+        }
+      } catch(e){ console.warn("image migration pass failed", e); }
+    }, 1500);
+  }
+};
+</script>
+<script src="supabase.js"></script>
+<script type="module">
+import { SUPABASE_URL, SUPABASE_ANON_KEY, DEV_AUTOLOGIN, DEV_EMAIL, DEV_PASSWORD } from "./config.js";
+const { createClient } = window.supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const id = new URLSearchParams(location.search).get("id");
+function fail(msg){ document.body.innerHTML = '<p style="padding:24px;font:14px -apple-system,sans-serif;color:#86868b">'+msg+'</p>'; }
+function banner(text, color){ const b=document.createElement('div'); b.textContent=text;
+  b.style.cssText='position:fixed;top:10px;right:12px;z-index:99999;background:'+color+';color:#fff;font:12px -apple-system,sans-serif;font-weight:600;padding:5px 12px;border-radius:999px;box-shadow:0 2px 8px rgba(0,0,0,.2)';
+  document.body.appendChild(b); return b; }
+// crash-proofing: never let an uncaught error kill the canvas silently
+window.addEventListener("error", function(e){ try{ console.warn("LiteBoard error:", e.message); }catch(_){} });
+window.addEventListener("unhandledrejection", function(e){ try{ console.warn("LiteBoard rejection:", (e.reason&&e.reason.message)||e.reason); }catch(_){} });
+(async () => {
+  if (!id) return fail("No board id.");
+  let { data: { session } } = await sb.auth.getSession();
+  if (!session && DEV_AUTOLOGIN) {
+    await sb.auth.signInWithPassword({ email: DEV_EMAIL, password: DEV_PASSWORD });
+    session = (await sb.auth.getSession()).data.session;
+  }
+  if (!session) return fail("Not signed in.");
+  const me = session.user.id;
+  const { data: board, error } = await sb.from("boards").select("id,doc,owner_id").eq("id", id).single();
+  if (error || !board) return fail("Board not found, or you don't have access.");
+  let canEdit = board.owner_id === me;
+  if (!canEdit) {
+    const { data: m } = await sb.from("board_members").select("role").eq("board_id", id).eq("user_id", me).maybeSingle();
+    canEdit = m?.role === "editor";
+  }
+  window.__CLOUD_DOC = (board.doc && board.doc.pages && board.doc.pages.length) ? board.doc : undefined;
+  if (canEdit) {
+    // Upload media to Supabase Storage and return a URL (Miro-style: keep the board light).
+    window.__cloudUpload = async (blob, name) => {
+      const safe = (name || "img").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 40);
+      const path = id + "/" + Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "_" + safe;
+      const { error } = await sb.storage.from("board-media").upload(path, blob, { contentType: blob.type || "image/jpeg", upsert: false });
+      if (error) throw error;
+      return sb.storage.from("board-media").getPublicUrl(path).data.publicUrl;
+    };
+    // Silent background save (Miro-style): debounced, async, coalesced, with retry.
+    // No success UI. A small notice appears ONLY if a save fails, so work is never lost silently.
+    let timer = null, pending = null, saving = false, errTag = null;
+    function thumbFromDoc(dc){ try { var p = dc.pages && dc.pages[dc.cur||0]; if(!p||!p.cards) return null;
+      var urls=[]; for(var i=0;i<p.cards.length && urls.length<4;i++){ var c=p.cards[i]; if(c.type==="image"&&c.src&&(/^https?:/.test(c.src)||c.src.length<150000)) urls.push(c.src); } return urls.length ? JSON.stringify(urls) : null; } catch(e){ return null; } }
+    const flush = async () => {
+      if (saving || pending === null) return;
+      const d = JSON.parse(JSON.stringify(pending)); pending = null; saving = true;
+      try { if (JSON.stringify(d).length > 8000000) { saving = false; if (!errTag) errTag = banner("board too large to save \u2014 remove some heavy media", "#ff3b30"); console.warn("doc exceeds 8MB, skipping save"); return; } } catch (_) {}
+      const { error } = await sb.from("boards").update({ doc: d, thumbnail: thumbFromDoc(d) }).eq("id", id);
+      saving = false;
+      if (error) {
+        console.warn("LiteBoard save failed, retrying:", error.message);
+        pending = d;
+        if (!errTag) errTag = banner("can\u2019t save \u2014 retrying", "#ff3b30");
+        setTimeout(flush, 3000);
+      } else {
+        if (errTag) { errTag.remove(); errTag = null; }
+        // #4: throttled version-history snapshot (~1 per 2 min of editing); fire-and-forget
+        try { var _nt = Date.now(); if (!window.__lastHist || _nt - window.__lastHist > 120000) { window.__lastHist = _nt; sb.from("board_history").insert({ board_id: id, doc: d, saved_by: me }); } } catch(e){}
+        if (pending !== null) flush();
+      }
+    };
+    window.__cloudSave = (doc) => {
+      if (window.__cloudBroadcast) window.__cloudBroadcast(doc); // live realtime push (M3)
+      pending = doc;
+      if (timer) return;
+      timer = setTimeout(() => { timer = null; flush(); }, 1000);
+    };
+  } else {
+    window.__cloudSave = () => {};
+    banner("view only", "#8e8e93");
+  }
+  try { window.__bootLiteBoard && window.__bootLiteBoard(); }
+  catch (e) { console.warn("board render failed:", e); banner("Couldn't fully load this board — try reloading", "#ff9500"); }
+  const myName = (session.user.email || "someone").split("@")[0];
+  if (window.__initRealtime) window.__initRealtime(sb, id, me, myName, canEdit);
+})();
 </script>
 </body>
 </html>

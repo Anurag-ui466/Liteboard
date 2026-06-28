@@ -379,8 +379,12 @@ window.addEventListener("unhandledrejection", function(e){ try{ console.warn("Li
 })();
 </script>
 """
-assert app.count("</body>") >= 1, "no </body> found"
-app = app.replace("</body>", BOOTSTRAP + "</body>", 1)
+assert "</body>" in app, "no </body> found"
+# Inject before the LAST </body> (the real document end). Using the first occurrence would
+# match a literal "</body>" inside an engine JS string (e.g. the Snapshot exporter), splicing
+# the bootstrap into that string and breaking the whole script.
+_bidx = app.rfind("</body>")
+app = app[:_bidx] + BOOTSTRAP + app[_bidx:]
 
 with open(OUT, "w", encoding="utf-8") as f:
     f.write(app)
