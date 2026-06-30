@@ -376,7 +376,69 @@ function render(){
   (B().frames||[]).forEach(f=>canvas.insertBefore(buildFrame(f),ink));
   B().cards.forEach(c=>canvas.insertBefore(buildCard(c),ink));
   renderInk();renderTabs();applyView();updateHistUI();applySel();
+  scheduleAutoArrange();
 }
+
+// ---------- auto-arrange (de-overlap) ----------
+// When cards land on the board (initial load OR a live push), they can overlap because the
+// publisher can't know each card's final rendered height — image aspect + title + caption are only
+// known HERE, after layout. This pass measures the REAL height of every card from the DOM and
+// nudges overlapping cards straight down until nothing collides. It is gentle: never moves a card
+// that doesn't overlap, never changes a card's x (columns are preserved), and skips locked cards
+// (using them only as obstacles). Runs automatically after render; also exposed for a button.
+let __arrLock = false, __arrTimer = null;
+function scheduleAutoArrange(){
+  if (__arrLock) return;                 // don't recurse: our own render() must not re-trigger us
+  clearTimeout(__arrTimer);
+  __arrTimer = setTimeout(autoArrange, 80);
+}
+function autoArrange(){
+  if (__arrLock) return;
+  // A card's height is 0 until its <img> loads, so wait for any pending images before measuring.
+  const pending = [...canvas.querySelectorAll('.card img')].filter(im => !im.complete);
+  if (pending.length){
+    let left = pending.length;
+    const go = () => { if (--left <= 0) _arrangeCore(); };
+    pending.forEach(im => { im.addEventListener('load', go, {once:true}); im.addEventListener('error', go, {once:true}); });
+    return;
+  }
+  _arrangeCore();
+}
+function _arrangeCore(){
+  const page = B(); if (!page || !page.cards || page.cards.length < 2) return;
+  const GAP = 22;                        // vertical breathing room between stacked cards
+  const items = [];
+  page.cards.forEach(c => {
+    const el = canvas.querySelector('.card[data-id="' + c.id + '"]');
+    if (el) items.push({ c, x: c.x || 0, y: c.y || 0, w: el.offsetWidth, h: el.offsetHeight });
+  });
+  if (items.length < 2) return;
+  const hOverlap = (a, b) => a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1; // share a column?
+  let moved = false;
+  for (let pass = 0; pass < 12; pass++){
+    let any = false;
+    items.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    for (let i = 1; i < items.length; i++){
+      const A = items[i];
+      if (A.c.locked) continue;          // honour locked cards: obstacle, but never moved
+      let ny = A.y;
+      for (let j = 0; j < i; j++){
+        const Bb = items[j];             // Bb is at/above A (sorted by y)
+        if (!hOverlap(A, Bb)) continue;
+        const need = Bb.y + Bb.h + GAP;
+        if (ny < need) ny = need;        // push A below the lowest card it collides with
+      }
+      if (ny > A.y + 0.5){ A.y = ny; any = true; moved = true; }
+    }
+    if (!any) break;
+  }
+  if (!moved) return;
+  items.forEach(it => { it.c.y = Math.round(it.y); });
+  __arrLock = true;
+  try { persist(); render(); } finally { __arrLock = false; }
+  if (typeof toast === 'function') toast('Auto-arranged to remove overlap');
+}
+try { window.__lbAutoArrange = autoArrange; } catch(e){}
 function renderTabs(){const bar=document.getElementById('pages');bar.innerHTML='';
   doc.pages.forEach((p,i)=>{const t=document.createElement('div');t.className='tab'+(i===doc.cur?' active':'');t.innerHTML=`<span class="nm">${p.name}</span><span class="tx">✕</span>`;
     t.querySelector('.nm').onclick=()=>{doc.cur=i;persist();render()};
